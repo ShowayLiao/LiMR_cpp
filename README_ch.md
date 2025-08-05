@@ -73,7 +73,7 @@
   
 ## Ⅱ 调整CMakeLists内容
 调整下面代码中的路径为实际安装的路径。若想调整cmake相关内容以适应需求，可参考[cmake配置方法](./doc/cmake.md)。
-<div align="center">
+
 
 ```cpp
 set(OpenCV_DIR "C:/opencv_s/build/install")// 实际install路径
@@ -86,7 +86,6 @@ link_directories(~/libtorch/lib)
 
 ```
 
-</div>
 
 ## Ⅲ 使用CMake编译
 1. 在扩展插件里搜索CMake，下载`CMake`和`CMake Tools`
