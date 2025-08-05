@@ -72,7 +72,6 @@ Due to space limitations, only version numbers are listed here. For detailed ins
   
 ## Ⅱ Modify CMakeLists
 Adjust paths in the following code to your actual installation paths. For CMake customization, see [CMake Configuration Guide](./doc/cmake_en.md).
-<div align="center">
 
 ```cpp
 cmake
@@ -93,7 +92,6 @@ link_directories(~/libtorch/lib)
 
 ```
 
-</div>
 
 ## Ⅲ Compile with CMake
 1. Search for CMake in VSCode extensions, install `CMake` and `CMake Tools`
