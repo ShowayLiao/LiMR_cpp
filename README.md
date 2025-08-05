@@ -56,7 +56,6 @@ Additionally, configuring OpenCV, TensorRT, and other libraries through CMake in
 
 </details>
 
----
 
 # 📌 Quick Start
 ~~(May not be as quick as expected)~~
