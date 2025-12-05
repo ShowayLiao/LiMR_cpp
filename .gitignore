@@ -1,0 +1,20 @@
+# 忽略编译生成的文件夹
+build/
+bin/
+out/
+
+# 忽略 Visual Studio 的临时配置文件夹
+.vs/
+.vscode/
+
+# 忽略输入的大文件文件夹 (根据你的截图)
+input/
+
+# 忽略常见的编译中间文件
+*.exe
+*.dll
+*.lib
+*.obj
+*.pdb
+*.ilk
+*.log
