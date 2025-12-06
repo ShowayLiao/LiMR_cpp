@@ -223,9 +223,9 @@ namespace pipeline {
         // ----------inference the models----------------
         
         auto t2 = std::chrono::high_resolution_clock::now();
-        std::cout << "preprocess time: " 
-                << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()
-                << " ms" << std::endl;
+        // std::cout << "preprocess time: " 
+        //         << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()
+        //         << " ms" << std::endl;
         t1 = std::chrono::high_resolution_clock::now();
 
         // copy the preprocessed frame to GPU memory
@@ -247,9 +247,9 @@ namespace pipeline {
         //---------------post process----------------
 
         t2 = std::chrono::high_resolution_clock::now();
-        std::cout << "CUDA time: " 
-                << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()
-                << " ms" << std::endl;
+        // std::cout << "CUDA time: " 
+        //         << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()
+        //         << " ms" << std::endl;
     
         // Copy the output from GPU memory to CPU memory
         // std::cout<< "Copying output from GPU to CPU..." << std::endl;
@@ -269,14 +269,14 @@ namespace pipeline {
         outputFrame = anomaly_map.clone(); // Copy the anomaly map to output frame
 
         t2 = std::chrono::high_resolution_clock::now();
-        std::cout << "post process time: " 
-                << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()
-                << " ms" << std::endl;
+        // std::cout << "post process time: " 
+        //         << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()
+        //         << " ms" << std::endl;
 
         auto total_end = std::chrono::high_resolution_clock::now();
-        std::cout << "total time: " 
-                << std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start).count()
-                << " ms" << std::endl;
+        // std::cout << "total time: " 
+        //         << std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start).count()
+        //         << " ms" << std::endl;
 
     }
 

@@ -174,7 +174,10 @@ flowchart TD
    * 针对新的需求，修改了原来的[视频进程程序](./src/video_thread.cpp)，让其仅具备在后端实时更新图片输出的功能。
    * 为了让配置参数可以在UI中手动调节，修改了原来的[主程序](./src/main.cpp)。
 2. 多次迭代，进一步降低可视化过程带来的时间开销。
-   * 将绘制矩形的opencv后端（基于cpu）更换为imgui后端（基于GPU）绘制，提高绘制速度。
+   * 重构可视化渲染管线，移除了 CPU 端的所有图像后处理逻辑。
+   * 引入 CUDA-OpenGL Interoperability 技术，实现了数据在显存内的直接流转。
+   * 编写自定义[ CUDA Kernels ](./src/cuda_render.cu) 替代 OpenCV 算子，利用 GPU 并行加速颜色映射与格式转换。
+   * 彻底消除了 `glTexImage2D` 带来的 Host-to-Device 带宽瓶颈，渲染延迟降低至微秒级，显著提升了系统吞吐量（25->30）。
 3. 
 
 

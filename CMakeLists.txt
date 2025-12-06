@@ -80,7 +80,7 @@ file(GLOB_RECURSE SRCS_CU ${PROJECT_SOURCE_DIR}/src/*.cu)
 list(APPEND SRCS ${SRCS_CU})
 
 # ### [修改] 将 ImGui 的源码加入到可执行文件中
-add_executable(limr ${PROJECT_SOURCE_DIR}/src/main.cpp ${SRCS} ${IMGUI_SOURCES})
+add_executable(limr ${SRCS} ${IMGUI_SOURCES})
 
 # -------------------------------------------------------------------
 # 链接库

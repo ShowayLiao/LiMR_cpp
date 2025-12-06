@@ -22,7 +22,7 @@ Dashboard::~Dashboard() {
     if (tex_frame) glDeleteTextures(1, &tex_frame);
     // [新增]
     if (tex_heatmap) glDeleteTextures(1, &tex_heatmap);
-    if (tex_overlay) glDeleteTextures(1, &tex_overlay);
+    // if (tex_overlay) glDeleteTextures(1, &tex_overlay);
 }
 
 void Dashboard::SetupStyle() {
@@ -43,10 +43,12 @@ void Dashboard::SetupStyle() {
 void Dashboard::UpdateTextures() {
     if (is_initialized && is_running && videoProcessor) {
         if (videoProcessor->update(defect_threshold)) {
-            update_texture_internal(videoProcessor->getResultFrame(), tex_frame);
-            // [新增] 上传热力图
-            update_texture_internal(videoProcessor->getResultHeatmap(), tex_heatmap);
-            update_texture_internal(videoProcessor->getResultOverlay(), tex_overlay);
+            // [修改] 直接拿 GPU Texture ID
+            tex_frame   = videoProcessor->getResultFrameTexture();
+            tex_heatmap = videoProcessor->getResultHeatmapTexture();
+            
+            // Overlay 实际上就是 Frame，我们直接复用 ID 即可
+            tex_overlay = tex_frame;
         }
     }
 }
@@ -208,9 +210,57 @@ void Dashboard::DrawMainView(float start_x, float width, float height) {
         ImGui::SameLine(0, pad);
 
         // 3. 最终结果图（红框在原图上）
+        // ImGui::BeginGroup();
+        // ImGui::Text("Defect Detection");
+        // ImGui::Image((void*)(intptr_t)tex_overlay, ImVec2(targetW, targetH));
+        // ImGui::EndGroup();
+
+        // ImGui::SameLine(0, pad); 
         ImGui::BeginGroup();
         ImGui::Text("Defect Detection");
+
+        // [步骤 1] 获取当前图片在屏幕上的起始绝对坐标
+        ImVec2 p_min = ImGui::GetCursorScreenPos();
+
+        // [步骤 2] 绘制底图
         ImGui::Image((void*)(intptr_t)tex_overlay, ImVec2(targetW, targetH));
+
+        // [步骤 3] 获取画笔，绘制红框
+        auto rects = videoProcessor->getDefectRects();
+        
+        if (!rects.empty() && appConfig) { // 确保 appConfig 存在
+            ImDrawList* draw_list = ImGui::GetWindowDrawList();
+            
+            // 【核心修复：计算缩放比例】
+            // 获取推理时使用的基准分辨率 (后端是基于这个分辨率算的坐标)
+            // 我们从配置对象中读取这些值，确保通用性
+            float baseW = (float)appConfig->inputWidth;  // 例如 448.0f
+            float baseH = (float)appConfig->inputHeight; // 例如 448.0f
+
+            // 防止除以零的保护措施
+            if (baseW > 0 && baseH > 0) {
+                 // 计算缩放因子： (当前显示的宽高 / 基准宽高)
+                float scale_x = targetW / baseW;
+                float scale_y = targetH / baseH;
+
+                for (const auto& rect : rects) {
+                    // 【核心修复：应用缩放】
+                    // 屏幕绝对坐标 X = 图片起始X + (原始坐标X * 缩放因子X)
+                    float x = p_min.x + rect.x * scale_x;
+                    float y = p_min.y + rect.y * scale_y;
+                    float w = rect.width * scale_x;
+                    float h = rect.height * scale_y;
+
+                    // 绘制矩形
+                    draw_list->AddRect(
+                        ImVec2(x, y),          // 左上角
+                        ImVec2(x + w, y + h),  // 右下角
+                        IM_COL32(255, 0, 0, 255), // 红色
+                        0.0f, 0, 2.0f // 无圆角，线宽2.0
+                    );
+                }
+            }
+        }
         ImGui::EndGroup();
 
     } else {

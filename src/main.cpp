@@ -12,7 +12,7 @@ int main(int, char**) {
     GLFWwindow* window = glfwCreateWindow(1600, 900, "LiMR Industrial Detector", NULL, NULL);
     if (!window) return 1;
     glfwMakeContextCurrent(window);
-    glfwSwapInterval(1); // 开启垂直同步
+    glfwSwapInterval(0); // 开启垂直同步
 
     // 2. ImGui 初始化
     IMGUI_CHECKVERSION();
