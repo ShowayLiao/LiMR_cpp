@@ -1,129 +1,83 @@
-# include "video_thread.h"
-# include "config.h"
-# include "pipeline.h"
-
+#include "video_thread.h"
 
 namespace VideoThread {
-    //-----------define class VideoCaptureThread---------------
-    VideoCaptureThread::VideoCaptureThread(const Config& videoConfig)
-        : source(videoConfig.videoSource), running(false),config(videoConfig),pipeline(config) {
-        cap.open(source);
-        if (!cap.isOpened()) {
-            std::cerr << "Error: Could not open video source " << source << std::endl;
-        }
 
+    VideoCaptureThread::VideoCaptureThread(const Config& videoConfig)
+        : source(videoConfig.videoSource), config(videoConfig), pipeline(config) {
+        
+        if(config.imgSource == " ") {
+             cap.open(source);
+             if (!cap.isOpened()) {
+                 std::cerr << "Error: Could not open video source " << source << std::endl;
+             }
+        }
+        // 如果是图片模式，逻辑稍有不同，这里为了简化演示，主要适配视频流
     }
 
-    // Destructor to release resources
     VideoCaptureThread::~VideoCaptureThread() {
         stop();
     }
 
     void VideoCaptureThread::stop() {
-        running = false;
-        cap.release();
         if (cap.isOpened()) {
-            std::cerr << "Error: Could not release video source " << source << std::endl;
+            cap.release();
         }
-        cv::destroyAllWindows();
+        // cv::destroyAllWindows(); // [删除] ImGui 不需要这个
     }
 
-    // Start the video capture thread
-    void VideoCaptureThread::start() {
-        if (!running) {
-            running = true;
-            if(config.imgSource == " ") {
-                // std::thread(&VideoCaptureThread::run, this).detach(); // Start video capture thread
-                run();
-            } else {
-                // std::thread(&VideoCaptureThread::run_img, this).detach(); // Start image capture thread
-                run_img();
-            }
-        }
-    }
-
-    void VideoCaptureThread::run(){
+    // [核心重构] 处理单帧逻辑
+    bool VideoCaptureThread::update() {
         cv::Mat frame;
-        cv::Mat anomaly_map;
-        cv::Mat heatmap;
-        cv::Mat overlay;
-        while (running) {
-            if (!cap.read(frame)) {
-                std::cerr << "Error: Could not read frame from video source " << source << std::endl;
-                break;
-            }
-            // std::cout<<frame.channels()<<" channels"<<std::endl;
-
-            pipeline.inference(frame, anomaly_map);
-
-            cv::resize(frame, frame, cv::Size(448, 448));
-
-            visualizeAnomalyMap(anomaly_map, heatmap,frame,overlay);
-
-            cv::imshow("Video Frame", frame);
-            cv::imshow("Anomaly Map", overlay);
-            
-            if (cv::waitKey(1) >= 0) { // Wait for 30 ms or until a key is pressed
-                break;
+        
+        // 1. 读取数据
+        if (config.imgSource != " ") {
+            // 图片模式：每次读同一张图 (或者你可以做个标志位只读一次)
+            frame = cv::imread(config.imgSource);
+            if (frame.empty()) return false;
+        } else {
+            // 视频模式
+            if (!cap.isOpened() || !cap.read(frame)) {
+                // 视频播放结束，可以选择循环播放
+                cap.set(cv::CAP_PROP_POS_FRAMES, 0); 
+                if(!cap.read(frame)) return false; 
             }
         }
-        stop();
 
-    }
-
-    void VideoCaptureThread::run_img(){
-        cv::Mat frame;
+        // 2. 推理
         cv::Mat anomaly_map;
-        cv::Mat heatmap;
-        cv::Mat overlay;
-
-        frame = cv::imread(config.imgSource);
-
         pipeline.inference(frame, anomaly_map);
 
-        cv::resize(frame, frame, cv::Size(config.outputHeight, config.outputHeight));
+        // 3. 统一 Resize (为了 UI 显示整齐)
+        // 注意：这里建议直接 resize 到 config.outputHeight，或者由 UI 决定缩放
+        cv::resize(frame, frame, cv::Size(448, 448)); 
 
-        visualizeAnomalyMap(anomaly_map, heatmap,frame,overlay);
+        // 4. 生成可视化结果
+        cv::Mat heatmap, overlay;
+        visualizeAnomalyMap(anomaly_map, heatmap, frame, overlay);
 
+        // 5. 将结果存入类成员变量，供 UI 读取
+        // ImGui 需要 RGB 格式，OpenCV 默认是 BGR，这里可以顺便转一下
+        cv::cvtColor(frame, this->display_frame, cv::COLOR_BGR2RGB);
+        cv::cvtColor(overlay, this->display_overlay, cv::COLOR_BGR2RGB);
 
-        cv::imshow("Video Frame", frame);
-        cv::imshow("Anomaly Map", overlay);
-
-        cv::waitKey(0); // Wait indefinitely until a key is pressed
-        
-        stop();
-
-    }
-
-
-
-    bool VideoCaptureThread::isRunning() const {
-        return running;
+        return true;
     }
 
     void VideoCaptureThread::visualizeAnomalyMap(const cv::Mat& anomaly_map, cv::Mat& heatmap,
-                                                 const cv::Mat& original_frame,cv::Mat & overlay) {
-        // Normalize the anomaly map to [0, 255] for visualization
-        // cv::Mat normalized_map;
-        // cv::normalize(anomaly_map, normalized_map, 0, 255, cv::NORM_MINMAX);
-        // Clip values to [0, 1]
-
+                                                 const cv::Mat& original_frame, cv::Mat& overlay) {
         cv::Mat nomalized_map;
-
         if (anomaly_map.type() != CV_32FC1) {
-            anomaly_map.convertTo(nomalized_map, CV_32FC1); // Convert to float and normalize
+            anomaly_map.convertTo(nomalized_map, CV_32FC1);
+        } else {
+            nomalized_map = anomaly_map.clone();
         }
-        else nomalized_map = anomaly_map.clone();
         
-        cv::multiply(nomalized_map, 255.0, nomalized_map); // Scale to [0, 255]
+        cv::multiply(nomalized_map, 255.0, nomalized_map);
         nomalized_map.convertTo(heatmap, CV_8UC1);
 
-        // Apply a colormap for better visualization
         cv::applyColorMap(heatmap, heatmap, cv::COLORMAP_JET);
-        cv::resize(heatmap, heatmap, original_frame.size()); // Resize heatmap to match the original frame size
-        cv::addWeighted(original_frame, 0.5, heatmap, 0.5, 0,overlay); // Blend the heatmap with the original frame
+        cv::resize(heatmap, heatmap, original_frame.size());
+        cv::addWeighted(original_frame, 0.5, heatmap, 0.5, 0, overlay);
     }
-
-
 
 } // namespace VideoThread
