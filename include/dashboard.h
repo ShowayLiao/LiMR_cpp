@@ -33,8 +33,10 @@ private:
     bool is_running = false;
     
     // 纹理句柄
-    unsigned int tex_frame = 0;   // GLuint
-    unsigned int tex_overlay = 0; // GLuint
+    unsigned int tex_frame = 0;   // 原始图
+    // [新增] 纯热力图纹理
+    unsigned int tex_heatmap = 0; 
+    unsigned int tex_overlay = 0; // 最终结果图
 
     // --- 输入缓存 (ImGui 需要 char*) ---
     char video_path[256] = "../../input/blade.avi";
@@ -45,4 +47,6 @@ private:
     
     int current_precision_idx = 0;
     const char* precision_items[2] = { "F32", "F16 "};
+
+    float defect_threshold = 0.5f;
 };

@@ -19,8 +19,9 @@ Dashboard::Dashboard() {
 }
 
 Dashboard::~Dashboard() {
-    // 智能指针会自动释放 backend，这里可以手动清理纹理
     if (tex_frame) glDeleteTextures(1, &tex_frame);
+    // [新增]
+    if (tex_heatmap) glDeleteTextures(1, &tex_heatmap);
     if (tex_overlay) glDeleteTextures(1, &tex_overlay);
 }
 
@@ -38,10 +39,13 @@ void Dashboard::SetupStyle() {
     colors[ImGuiCol_Text]     = ImVec4(0.90f, 0.90f, 0.92f, 1.00f);
 }
 
+// 2. UpdateTextures 中增加热力图的上传
 void Dashboard::UpdateTextures() {
     if (is_initialized && is_running && videoProcessor) {
-        if (videoProcessor->update()) {
+        if (videoProcessor->update(defect_threshold)) {
             update_texture_internal(videoProcessor->getResultFrame(), tex_frame);
+            // [新增] 上传热力图
+            update_texture_internal(videoProcessor->getResultHeatmap(), tex_heatmap);
             update_texture_internal(videoProcessor->getResultOverlay(), tex_overlay);
         }
     }
@@ -86,9 +90,23 @@ void Dashboard::DrawSidePanel(float width, float height) {
     ImGui::InputText("Tea Engine", tea_engine_path, 256);
     // ... 其他输入框 ...
     ImGui::Combo("Precision", &current_precision_idx, precision_items, 2);
+
     if (is_initialized) ImGui::EndDisabled();
 
     ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Text("Inference Parameters");
+    
+    // 滑块：范围 0.0 到 1.0
+    ImGui::SliderFloat("Threshold", &defect_threshold, 0.0f, 1.0f, "Conf: %.2f");
+    // 添加一句解释
+    if (ImGui::IsItemHovered()) 
+        ImGui::SetTooltip("Adjust sensitivity for defect contours");
+
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    // ImGui::Spacing();
     
     // 按钮逻辑
     float btnH = 45.0f;
@@ -141,37 +159,60 @@ void Dashboard::DrawMainView(float start_x, float width, float height) {
     // 背景设黑
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.08f, 0.08f, 1.0f));
     ImGui::Begin("ViewPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
-    ImGui::PopStyleColor();
+    // ImGui::PopStyleColor();
 
-    if (tex_frame != 0 && tex_overlay != 0) {
-        // 自适应布局计算
-        float pad = 20.0f;
-        float availW = width - pad * 3; // 减去间隙
-        float targetW = availW / 2.0f;
-        float targetH = targetW; // 1:1 比例
+    // ImGui::Begin("ViewPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
+    // ImGui::PopStyleColor();
 
-        if (targetH > height - 100) { // 高度限制
-            targetH = height - 100;
+    // [修改判断条件] 检查三个纹理是否都准备好了
+    if (tex_frame != 0 && tex_overlay != 0 && tex_heatmap != 0) {
+        // --- 自适应三栏布局计算 ---
+        float pad = 15.0f; // 图片之间的间距
+        // 总宽度减去左、中1、中2、右四个间隙
+        float availW = width - pad * 4; 
+        // 分成三份
+        float targetW = availW / 3.0f;
+        float targetH = targetW; // 假设 1:1 比例
+
+        // 高度限制检查
+        if (targetH > height - 80) { 
+            targetH = height - 80;
             targetW = targetH;
         }
 
-        // 居中
-        float cursorX = (width - (targetW * 2 + pad)) / 2.0f;
-        if (cursorX < 0) cursorX = 0;
-        ImGui::SetCursorPos(ImVec2(cursorX, (height - targetH) / 2.0f));
+        // 整体居中计算
+        float totalContentWidth = targetW * 3 + pad * 2;
+        float cursorX = (width - totalContentWidth) / 2.0f;
+        float cursorY = (height - targetH) / 2.0f;
+        if (cursorX < pad) cursorX = pad;
+        if (cursorY < pad) cursorY = pad;
 
-        // 画图
+        ImGui::SetCursorPos(ImVec2(cursorX, cursorY));
+
+        // --- 绘制三张图 ---
+        
+        // 1. 原始图
         ImGui::BeginGroup();
-        ImGui::Text("Original");
+        ImGui::Text("Original Input");
         ImGui::Image((void*)(intptr_t)tex_frame, ImVec2(targetW, targetH));
         ImGui::EndGroup();
 
         ImGui::SameLine(0, pad);
 
+        // 2. [新增] 纯热力图
         ImGui::BeginGroup();
-        ImGui::Text("Result");
+        ImGui::Text("Heatmap View");
+        ImGui::Image((void*)(intptr_t)tex_heatmap, ImVec2(targetW, targetH));
+        ImGui::EndGroup();
+
+        ImGui::SameLine(0, pad);
+
+        // 3. 最终结果图（红框在原图上）
+        ImGui::BeginGroup();
+        ImGui::Text("Defect Detection");
         ImGui::Image((void*)(intptr_t)tex_overlay, ImVec2(targetW, targetH));
         ImGui::EndGroup();
+
     } else {
         // 显示等待文字
         const char* txt = "WAITING FOR SIGNAL...";
@@ -181,4 +222,5 @@ void Dashboard::DrawMainView(float start_x, float width, float height) {
     }
 
     ImGui::End();
+    ImGui::PopStyleColor();
 }
