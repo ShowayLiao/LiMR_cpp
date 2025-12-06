@@ -27,6 +27,7 @@ namespace VideoThread {
         cv::Mat getResultOverlay() const { return display_overlay; }
         
         
+        
         // [新增] 用于控制参数（如果需要 UI 调整阈值等）
         // void setThreshold(float t);
 

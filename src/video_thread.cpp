@@ -82,7 +82,7 @@ namespace VideoThread {
         // 1. 复制一份原图作为底图
         final_overlay = original_frame.clone();
 
-        // 2. 计算二值化掩膜
+        // // 2. 计算二值化掩膜
         cv::Mat binary_mask;
         double thresh_val = threshold * 255.0;
         cv::threshold(norm_map_8u, binary_mask, thresh_val, 255, cv::THRESH_BINARY);
