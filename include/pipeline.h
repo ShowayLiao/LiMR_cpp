@@ -22,7 +22,8 @@ namespace pipeline {
     public:
         Pipeline(const Config& videoConfig);
 
-        void inference(cv::Mat& inputFrame, cv::Mat& outputFrame);
+        // void inference(cv::Mat& inputFrame, cv::Mat& outputFrame);
+        void inference(cv::Mat& inputFrame, float*& d_output_anomaly_map);
         nvinfer1::ICudaEngine* load_model(const std::string& modelPath);
         void allocate_memory(nvinfer1::ICudaEngine*& Engine,
                             nvinfer1::IExecutionContext*& StuContext,
@@ -32,7 +33,8 @@ namespace pipeline {
         //                         cudaStream_t& stream,  
         //                         std::vector<void*>& buffer,
         //                         std::vector<torch::Tensor> outputTensors);
-        void cal_anomaly_map(cv::Mat& anomaly_map);
+        void cal_anomaly_map();
+        
         
 
 
@@ -53,6 +55,8 @@ namespace pipeline {
         cudaGraphExec_t graphExec;
         bool graphInitialized = false; // 标记图是否已初始化
         cv::cuda::HostMem hostMem;
+        float* d_final_anomaly_map = nullptr;
+
         
     };
 

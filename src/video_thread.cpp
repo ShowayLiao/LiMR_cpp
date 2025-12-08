@@ -35,37 +35,42 @@ namespace VideoThread {
         // 即使 pipeline 内部也会 resize，但我们需要这张图来显示
         cv::resize(frame, frame, cv::Size(config.inputWidth, config.inputWidth));
 
-        // 3. 推理 (output_anomaly 是 float 类型)
-        pipeline.inference(frame, output_anomaly);
+        // 3. [修改] 推理
+        float* d_anomaly_map_gpu = nullptr; // 用于接收 GPU 指针
+        pipeline.inference(frame, d_anomaly_map_gpu);
 
         // ==========================================
-        // 4. [优化核心] 渲染热力图 (Float -> GPU -> Texture)
+        // 4. 渲染热力图 (全 GPU 链路)
         // ==========================================
-        // output_anomaly 是 32F 单通道
-        size_t heatmap_size = output_anomaly.cols * output_anomaly.rows * sizeof(float);
-        cuda_tex_heatmap.upload_and_render_heatmap((float*)output_anomaly.data, heatmap_size);
+        // d_anomaly_map_gpu 现在已经在显存里了
+        // CudaInteropTexture 现在的 upload_... 接收 GPU 指针并执行 D2D 拷贝
+        size_t heatmap_size = config.inputWidth * config.inputWidth * sizeof(float);
+        cuda_tex_heatmap.upload_and_render_heatmap(d_anomaly_map_gpu, heatmap_size);
 
         // ==========================================
-        // 5. [优化核心] 渲染原图 (BGR -> GPU -> RGB Texture)
+        // 5. 渲染原图 (暂维持原状)
         // ==========================================
-        // frame 是 BGR 8U 3通道
+        // 你的 inference 里还是用的 cpu Mat inputFrame，所以这里还是上传 CPU frame
         size_t frame_size = frame.cols * frame.rows * 3 * sizeof(unsigned char);
         cuda_tex_frame.upload_and_render_frame(frame.data, frame_size);
 
         // ==========================================
-        // 6. 计算缺陷框 (依然在 CPU 做，这部分开销极小)
+        // 6. 缺陷框计算 (需要下载一小部分数据回 CPU)
         // ==========================================
-        // 为了 findContours，我们需要一个小的二值图。这个操作很快，可以保留在 CPU
-        cv::Mat binary_mask;
-        cv::Mat norm_map_8u;
+        // 因为 findContours 必须在 CPU 跑，我们需要把热力图下载回来一小部分做二值化
+        // 或者，更聪明的方法：写一个 CUDA Kernel 做二值化，只下载 8-bit 的 mask (体积是 float 的 1/4)
+        // 这里简单演示直接下载 float 的情况：
         
-        // 简单的 float->8u 转换，用于 CPU 轮廓计算
-        // 注意：这里不需要 applyColorMap 了，只需要二值化
-        output_anomaly.convertTo(norm_map_8u, CV_8UC1, 255.0); 
+        static cv::Mat cpu_anomaly_map(config.inputWidth, config.inputWidth, CV_32FC1);
+        cudaMemcpy(cpu_anomaly_map.data, d_anomaly_map_gpu, heatmap_size, cudaMemcpyDeviceToHost);
+        
+        // 转换到 8U 做 findContours
+        cv::Mat norm_map_8u, binary_mask;
+        cpu_anomaly_map.convertTo(norm_map_8u, CV_8UC1, 255.0);
         
         double thresh_val = threshold * 255.0;
         cv::threshold(norm_map_8u, binary_mask, thresh_val, 255, cv::THRESH_BINARY);
-
+        
         std::vector<std::vector<cv::Point>> contours;
         cv::findContours(binary_mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
@@ -74,9 +79,6 @@ namespace VideoThread {
             if (cv::contourArea(contour) < 50) continue;
             this->defect_rects.push_back(cv::boundingRect(contour));
         }
-        
-        // 注意：这里我们不再生成 display_overlay 图像了
-        // 因为前端会复用 tex_frame 并把红框画在上面 (上一条优化)
 
         return true;
     }

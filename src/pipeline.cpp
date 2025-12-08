@@ -199,10 +199,12 @@ namespace pipeline {
                 cudaStreamCreate(&StuStream); // Create CUDA stream for student model
                 cudaStreamCreate(&TeaStream); // Create CUDA stream for teacher model
 
+                cudaMalloc(&d_final_anomaly_map, config.outputHeight * config.outputWidth * sizeof(float));
+
               };
 
 
-    void Pipeline::inference(cv::Mat& inputFrame, cv::Mat& outputFrame) {
+    void Pipeline::inference(cv::Mat& inputFrame, float*& d_output_ptr) {
         // ---------preprocess the input frame----------
         // time clock
         auto total_start = std::chrono::high_resolution_clock::now();
@@ -264,9 +266,13 @@ namespace pipeline {
         t1 = std::chrono::high_resolution_clock::now();
 
         // cudaDeviceSynchronize();
-        cal_anomaly_map(anomaly_map); // Calculate the anomaly map
+        cal_anomaly_map(); // Calculate the anomaly map
 
-        outputFrame = anomaly_map.clone(); // Copy the anomaly map to output frame
+        cudaStreamSynchronize(StuStream);
+
+        d_output_ptr = this->d_final_anomaly_map;
+
+        // outputFrame = anomaly_map.clone(); // Copy the anomaly map to output frame
 
         t2 = std::chrono::high_resolution_clock::now();
         // std::cout << "post process time: " 
@@ -277,6 +283,9 @@ namespace pipeline {
         // std::cout << "total time: " 
         //         << std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start).count()
         //         << " ms" << std::endl;
+
+
+       
 
     }
 
@@ -323,7 +332,7 @@ namespace pipeline {
 
     }
 
-    void Pipeline::cal_anomaly_map(cv::Mat& anomaly_map) {
+    void Pipeline::cal_anomaly_map() {
         if (StuBuffer.size() != TeaBuffer.size()) {
             throw std::runtime_error("Output buffers size mismatch");
         }
@@ -385,22 +394,32 @@ namespace pipeline {
         }
 
         // 7. squeeze and copy to CPU
-        TempAnomalyMap = TempAnomalyMap.squeeze(0).squeeze(0).cpu();
-        const size_t expected_bytes = TempAnomalyMap.numel() * elem_size;
-        
-        if (anomaly_map.total() * anomaly_map.elemSize() != expected_bytes) {
-            throw std::runtime_error("cv::Mat memory size mismatch");
+        TempAnomalyMap = TempAnomalyMap.squeeze(0).squeeze(0);
+
+        if (!TempAnomalyMap.is_contiguous()) {
+        TempAnomalyMap = TempAnomalyMap.contiguous();
         }
+
+        cudaMemcpyAsync(d_final_anomaly_map, TempAnomalyMap.data_ptr<float>(), 
+                    config.outputHeight * config.outputWidth * sizeof(float), 
+                    cudaMemcpyDeviceToDevice, 
+                    StuStream);
+            
+        // const size_t expected_bytes = TempAnomalyMap.numel() * elem_size;
         
-        // 8. copy the anomaly map to cv::Mat
-        if (anomaly_map.type() == CV_32F || tensorType == torch::kFloat32) {
-            std::memcpy(anomaly_map.data, TempAnomalyMap.data_ptr(), expected_bytes);
-        } 
-        else if (anomaly_map.type() == CV_16F && tensorType == torch::kFloat16) {
-            // Convert FP16 to half_float::half and copy
-            cudaMemcpy(anomaly_map.data, TempAnomalyMap.data_ptr(), 
-                    expected_bytes, cudaMemcpyDeviceToHost);
-        }
+        // if (anomaly_map.total() * anomaly_map.elemSize() != expected_bytes) {
+        //     throw std::runtime_error("cv::Mat memory size mismatch");
+        // }
+        
+        // // 8. copy the anomaly map to cv::Mat
+        // if (anomaly_map.type() == CV_32F || tensorType == torch::kFloat32) {
+        //     std::memcpy(anomaly_map.data, TempAnomalyMap.data_ptr(), expected_bytes);
+        // } 
+        // else if (anomaly_map.type() == CV_16F && tensorType == torch::kFloat16) {
+        //     // Convert FP16 to half_float::half and copy
+        //     cudaMemcpy(anomaly_map.data, TempAnomalyMap.data_ptr(), 
+        //             expected_bytes, cudaMemcpyDeviceToHost);
+        // }
     }
 
 

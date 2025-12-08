@@ -91,17 +91,20 @@ void CudaInteropTexture::init(int w, int h) {
 }
 
 // 渲染热力图
-void CudaInteropTexture::upload_and_render_heatmap(const float* cpu_ptr, size_t size_bytes) {
+void CudaInteropTexture::upload_and_render_heatmap(const float* gpu_ptr, size_t size_bytes) {
     if (!cuda_res) return;
 
-    // 分配输入 buffer
+    // 1. 分配内部 buffer
     if (!d_buffer) cudaMalloc(&d_buffer, size_bytes);
-    cudaMemcpy(d_buffer, cpu_ptr, size_bytes, cudaMemcpyHostToDevice);
 
-    // 分配输出 buffer (uchar4)
-    // 【修复】不再使用 static，防止冲突
+    // 2. [核心修复] 使用 DeviceToDevice (显存内拷贝)
+    // 你的 ptr 已经在 GPU 上了，千万不能用 HostToDevice！
+    cudaMemcpy(d_buffer, gpu_ptr, size_bytes, cudaMemcpyDeviceToDevice);
+
+    // 3. 分配 RGBA buffer (解决条纹的另一个关键)
     if (!d_rgba_buffer) cudaMalloc(&d_rgba_buffer, width * height * sizeof(uchar4));
 
+    // 4. Map
     cudaGraphicsMapResources(1, &cuda_res, 0);
     cudaArray_t viewCudaArray;
     cudaGraphicsSubResourceGetMappedArray(&viewCudaArray, cuda_res, 0, 0);
@@ -109,10 +112,10 @@ void CudaInteropTexture::upload_and_render_heatmap(const float* cpu_ptr, size_t 
     dim3 block(16, 16);
     dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
     
-    // 运行 Kernel
+    // 5. Render
     render_heatmap_kernel<<<grid, block>>>((float*)d_buffer, (uchar4*)d_rgba_buffer, width, height);
 
-    // 拷贝 uchar4 数据到 Array
+    // 6. Copy to Texture Array
     cudaMemcpy2DToArray(viewCudaArray, 0, 0, d_rgba_buffer, width * sizeof(uchar4), width * sizeof(uchar4), height, cudaMemcpyDeviceToDevice);
 
     cudaGraphicsUnmapResources(1, &cuda_res, 0);
@@ -120,24 +123,22 @@ void CudaInteropTexture::upload_and_render_heatmap(const float* cpu_ptr, size_t 
 
 // 渲染原图
 void CudaInteropTexture::upload_and_render_frame(const unsigned char* cpu_ptr, size_t size_bytes) {
+    // ... (保持 HostToDevice 不变，等你做完 GPU 解码再改这个) ...
+    // 代码同上一版
     if (!cuda_res) return;
-
     if (!d_buffer) cudaMalloc(&d_buffer, size_bytes);
-    cudaMemcpy(d_buffer, cpu_ptr, size_bytes, cudaMemcpyHostToDevice);
+    
+    // 暂时保持 HostToDevice
+    cudaMemcpy(d_buffer, cpu_ptr, size_bytes, cudaMemcpyHostToDevice); 
 
+    // ... (后续渲染逻辑不变)
     if (!d_rgba_buffer) cudaMalloc(&d_rgba_buffer, width * height * sizeof(uchar4));
-
     cudaGraphicsMapResources(1, &cuda_res, 0);
     cudaArray_t viewCudaArray;
     cudaGraphicsSubResourceGetMappedArray(&viewCudaArray, cuda_res, 0, 0);
-
     dim3 block(16, 16);
     dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
-    
-    // 输入是 uchar3 (BGR), 输出是 uchar4 (RGBA)
     render_frame_kernel<<<grid, block>>>((uchar3*)d_buffer, (uchar4*)d_rgba_buffer, width, height);
-
     cudaMemcpy2DToArray(viewCudaArray, 0, 0, d_rgba_buffer, width * sizeof(uchar4), width * sizeof(uchar4), height, cudaMemcpyDeviceToDevice);
-
     cudaGraphicsUnmapResources(1, &cuda_res, 0);
 }
