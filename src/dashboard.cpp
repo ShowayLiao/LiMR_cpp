@@ -86,11 +86,16 @@ void Dashboard::DrawSidePanel(float width, float height) {
     if (is_initialized) ImGui::BeginDisabled();
     ImGui::Text("Configuration");
     ImGui::InputText("Video", video_path, 256);
-    ImGui::InputText("Stu ONNX", stu_onnx_path, 256);
-    ImGui::InputText("Tea ONNX", tea_onnx_path, 256);
-    ImGui::InputText("Stu Engine", stu_engine_path, 256);
-    ImGui::InputText("Tea Engine", tea_engine_path, 256);
-    // ... 其他输入框 ...
+    
+    // 推理模式选择
+    ImGui::Combo("Inference Mode", &inference_mode_idx, inference_mode_items, 2);
+    
+    // Engine路径输入
+    ImGui::InputText("Engine Path A", engine_path_a, 256);
+    if (inference_mode_idx == 1) { // Dual Engine模式
+        ImGui::InputText("Engine Path B", engine_path_b, 256);
+    }
+    
     ImGui::Combo("Precision", &current_precision_idx, precision_items, 2);
 
     if (is_initialized) ImGui::EndDisabled();
@@ -117,14 +122,22 @@ void Dashboard::DrawSidePanel(float width, float height) {
             try {
                 // 这里调用你的 backend 初始化逻辑
                 std::string type_str = precision_items[current_precision_idx];
-                appConfig = std::unique_ptr<Config>(new Config(video_path, stu_engine_path, tea_engine_path, " ", type_str));
+                
+                // 根据选择的模式设置推理模式
+                InferenceMode mode = (inference_mode_idx == 0) ? InferenceMode::SINGLE_ENGINE : InferenceMode::DUAL_ENGINE;
+                
+                // 创建配置对象
+                appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, engine_path_a, engine_path_b, " ", type_str, mode));
                 
                 // 检查 engine (简化版，实际可用你的 build_engine 函数)
-                if (!std::ifstream(stu_engine_path).good()) {
-                    build_engine(stu_onnx_path, stu_engine_path, appConfig->batchSize, appConfig->inputWidth, appConfig->inputHeight, appConfig->outputWidth, appConfig->outputHeight);
+                if (!std::ifstream(engine_path_a).good()) {
+                    // 注意：这里应该有对应的ONNX路径，但根据需求，我们只关注Engine路径的输入
+                    std::cerr << "Engine Path A file does not exist: " << engine_path_a << std::endl;
+                    // continue;
                 }
-                if (!std::ifstream(tea_engine_path).good()) {
-                     build_engine(tea_onnx_path, tea_engine_path, appConfig->batchSize, appConfig->inputWidth, appConfig->inputHeight, appConfig->outputWidth, appConfig->outputHeight);
+                if (mode == InferenceMode::DUAL_ENGINE && !std::ifstream(engine_path_b).good()) {
+                    std::cerr << "Engine Path B file does not exist: " << engine_path_b << std::endl;
+                    // continue;
                 }
 
                 videoProcessor = std::unique_ptr<VideoThread::VideoCaptureThread>(new VideoThread::VideoCaptureThread(*appConfig));
@@ -148,6 +161,40 @@ void Dashboard::DrawSidePanel(float width, float height) {
             is_initialized = false;
             videoProcessor.reset();
             appConfig.reset();
+        }
+        
+        // Apply & Reload 按钮
+        ImGui::Spacing();
+        if (ImGui::Button("Apply & Reload", ImVec2(-1, btnH))) {
+            try {
+                // 停止当前视频线程
+                is_running = false;
+                
+                // 更新配置
+                std::string type_str = precision_items[current_precision_idx];
+                InferenceMode mode = (inference_mode_idx == 0) ? InferenceMode::SINGLE_ENGINE : InferenceMode::DUAL_ENGINE;
+                
+                // 创建新的配置对象
+                appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, engine_path_a, engine_path_b, " ", type_str, mode));
+                
+                // 检查引擎路径
+                if (!std::ifstream(engine_path_a).good()) {
+                    std::cerr << "Engine Path A file does not exist: " << engine_path_a << std::endl;
+                    return;
+                }
+                if (mode == InferenceMode::DUAL_ENGINE && !std::ifstream(engine_path_b).good()) {
+                    std::cerr << "Engine Path B file does not exist: " << engine_path_b << std::endl;
+                    return;
+                }
+                
+                // 重新初始化视频处理器
+                videoProcessor = std::unique_ptr<VideoThread::VideoCaptureThread>(new VideoThread::VideoCaptureThread(*appConfig));
+                if (videoProcessor->isOpened()) {
+                    is_running = true;
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "Error applying new configuration: " << e.what() << std::endl;
+            }
         }
     }
 

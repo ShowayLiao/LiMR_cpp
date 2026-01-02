@@ -4,7 +4,7 @@
 #include <string>
 #include "imgui.h"
 #include "video_thread.h"
-#include "config.h"
+#include "app_config.h"
 #include "utils.h" // 包含 build_engine 等声明
 
 class Dashboard {
@@ -25,7 +25,7 @@ private:
     void DrawMainView(float start_x, float width, float height);
     
     // --- 核心业务对象 (智能指针管理) ---
-    std::unique_ptr<Config> appConfig;
+    std::unique_ptr<AppConfig> appConfig;
     std::unique_ptr<VideoThread::VideoCaptureThread> videoProcessor;
 
     // --- UI 状态变量 ---
@@ -40,13 +40,17 @@ private:
 
     // --- 输入缓存 (ImGui 需要 char*) ---
     char video_path[256] = "../../input/blade.avi";
-    char stu_onnx_path[256] = "../../input/LiMR_student.onnx";
-    char tea_onnx_path[256] = "../../input/LiMR_teacher.onnx";
-    char stu_engine_path[256] = "../../input/LiMR_student_16.engine";
-    char tea_engine_path[256] = "../../input/LiMR_teacher_16.engine";
+    
+    // Engine路径输入
+    char engine_path_a[256] = "../../input/LiMR_student_16.engine";
+    char engine_path_b[256] = "../../input/LiMR_teacher_16.engine";
     
     int current_precision_idx = 0;
-    const char* precision_items[2] = { "F32", "F16 "};
+    const char* precision_items[2] = { "F32", "F16 " };
+    
+    // 推理模式选择
+    int inference_mode_idx = 0; // 0: Single Engine, 1: Dual Engine
+    const char* inference_mode_items[2] = { "Single Engine", "Dual Engine" };
 
     float defect_threshold = 0.5f;
 };

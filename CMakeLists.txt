@@ -96,6 +96,10 @@ file(GLOB IMGUI_SOURCES
 # 项目源文件
 file(GLOB_RECURSE SRCS ${PROJECT_SOURCE_DIR}/src/*.cpp)
 file(GLOB_RECURSE SRCS_CU ${PROJECT_SOURCE_DIR}/src/*.cu)
+
+# 从源文件列表中移除 pipeline.cpp，仅作保留不编译
+list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/pipeline.cpp")
+
 list(APPEND SRCS ${SRCS_CU})
 
 # ===================================================================
