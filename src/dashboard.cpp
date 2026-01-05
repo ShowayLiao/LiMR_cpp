@@ -1,4 +1,5 @@
 #include "dashboard.h"
+#include "model_loader.h"
 #include <iostream>
 #include <fstream>
 #include <GLFW/glfw3.h> // 如果需要 OpenGL 函数
@@ -126,21 +127,53 @@ void Dashboard::DrawSidePanel(float width, float height) {
                 // 根据选择的模式设置推理模式
                 InferenceMode mode = (inference_mode_idx == 0) ? InferenceMode::SINGLE_ENGINE : InferenceMode::DUAL_ENGINE;
                 
-                // 创建配置对象
-                appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, engine_path_a, engine_path_b, " ", type_str, mode));
+                // 创建模型加载器
+                ModelLoader modelLoader("./.cache");
                 
-                // 检查 engine (简化版，实际可用你的 build_engine 函数)
-                if (!std::ifstream(engine_path_a).good()) {
-                    // 注意：这里应该有对应的ONNX路径，但根据需求，我们只关注Engine路径的输入
-                    std::cerr << "Engine Path A file does not exist: " << engine_path_a << std::endl;
-                    // continue;
-                }
-                if (mode == InferenceMode::DUAL_ENGINE && !std::ifstream(engine_path_b).good()) {
-                    std::cerr << "Engine Path B file does not exist: " << engine_path_b << std::endl;
-                    // continue;
-                }
+                try {
+                    // 使用默认参数处理模型文件
+                    int defaultWidth = 224;
+                    int defaultHeight = 224;
+                    int defaultBatchSize = 1;
+                    
+                    // 处理模型文件A
+                    std::string processedEngineA = modelLoader.processModel(engine_path_a, 
+                                                                          defaultWidth, 
+                                                                          defaultHeight, 
+                                                                          defaultBatchSize,
+                                                                          type_str);
+                    
+                    // 处理模型文件B（如果是双引擎模式）
+                    std::string processedEngineB = engine_path_b;
+                    if (mode == InferenceMode::DUAL_ENGINE && strlen(engine_path_b) > 0) {
+                        processedEngineB = modelLoader.processModel(engine_path_b, 
+                                                                    defaultWidth, 
+                                                                    defaultHeight, 
+                                                                    defaultBatchSize,
+                                                                    type_str);
+                    }
+                    
+                    // 创建配置对象，使用处理后的模型路径
+                    appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, processedEngineA, processedEngineB, " ", type_str, mode));
+                    
+                    // 验证处理后的模型文件是否存在
+                    if (!std::ifstream(processedEngineA).good()) {
+                        throw ModelLoaderException("Processed engine A file not found: " + processedEngineA);
+                    }
+                    if (mode == InferenceMode::DUAL_ENGINE && !processedEngineB.empty() && !std::ifstream(processedEngineB).good()) {
+                        throw ModelLoaderException("Processed engine B file not found: " + processedEngineB);
+                    }
 
-                videoProcessor = std::unique_ptr<VideoThread::VideoCaptureThread>(new VideoThread::VideoCaptureThread(*appConfig));
+                    videoProcessor = std::unique_ptr<VideoThread::VideoCaptureThread>(new VideoThread::VideoCaptureThread(*appConfig));
+                } catch (const ModelLoaderException& e) {
+                    std::cerr << "[ERROR] Model processing failed: " << e.what() << std::endl;
+                    ImGui::OpenPopup("Error");
+                    return;
+                } catch (const std::exception& e) {
+                    std::cerr << "[ERROR] Initialization failed: " << e.what() << std::endl;
+                    ImGui::OpenPopup("Error");
+                    return;
+                }
                 if (videoProcessor->isOpened()) {
                     is_initialized = true;
                     is_running = true;
@@ -174,23 +207,56 @@ void Dashboard::DrawSidePanel(float width, float height) {
                 std::string type_str = precision_items[current_precision_idx];
                 InferenceMode mode = (inference_mode_idx == 0) ? InferenceMode::SINGLE_ENGINE : InferenceMode::DUAL_ENGINE;
                 
-                // 创建新的配置对象
-                appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, engine_path_a, engine_path_b, " ", type_str, mode));
+                // 创建模型加载器
+                ModelLoader modelLoader("./.cache");
                 
-                // 检查引擎路径
-                if (!std::ifstream(engine_path_a).good()) {
-                    std::cerr << "Engine Path A file does not exist: " << engine_path_a << std::endl;
+                try {
+                    // 使用默认参数处理模型文件
+                    int defaultWidth = 224;
+                    int defaultHeight = 224;
+                    int defaultBatchSize = 1;
+                    
+                    // 处理模型文件A
+                    std::string processedEngineA = modelLoader.processModel(engine_path_a, 
+                                                                          defaultWidth, 
+                                                                          defaultHeight, 
+                                                                          defaultBatchSize,
+                                                                          type_str);
+                    
+                    // 处理模型文件B（如果是双引擎模式）
+                    std::string processedEngineB = engine_path_b;
+                    if (mode == InferenceMode::DUAL_ENGINE && strlen(engine_path_b) > 0) {
+                        processedEngineB = modelLoader.processModel(engine_path_b, 
+                                                                    defaultWidth, 
+                                                                    defaultHeight, 
+                                                                    defaultBatchSize,
+                                                                    type_str);
+                    }
+                    
+                    // 创建新的配置对象，使用处理后的模型路径
+                    appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, processedEngineA, processedEngineB, " ", type_str, mode));
+                    
+                    // 验证处理后的模型文件是否存在
+                    if (!std::ifstream(processedEngineA).good()) {
+                        throw ModelLoaderException("Processed engine A file not found: " + processedEngineA);
+                    }
+                    if (mode == InferenceMode::DUAL_ENGINE && !processedEngineB.empty() && !std::ifstream(processedEngineB).good()) {
+                        throw ModelLoaderException("Processed engine B file not found: " + processedEngineB);
+                    }
+                    
+                    // 重新初始化视频处理器
+                    videoProcessor = std::unique_ptr<VideoThread::VideoCaptureThread>(new VideoThread::VideoCaptureThread(*appConfig));
+                    if (videoProcessor->isOpened()) {
+                        is_running = true;
+                    }
+                } catch (const ModelLoaderException& e) {
+                    std::cerr << "[ERROR] Model processing failed: " << e.what() << std::endl;
+                    ImGui::OpenPopup("Error");
                     return;
-                }
-                if (mode == InferenceMode::DUAL_ENGINE && !std::ifstream(engine_path_b).good()) {
-                    std::cerr << "Engine Path B file does not exist: " << engine_path_b << std::endl;
+                } catch (const std::exception& e) {
+                    std::cerr << "[ERROR] Initialization failed: " << e.what() << std::endl;
+                    ImGui::OpenPopup("Error");
                     return;
-                }
-                
-                // 重新初始化视频处理器
-                videoProcessor = std::unique_ptr<VideoThread::VideoCaptureThread>(new VideoThread::VideoCaptureThread(*appConfig));
-                if (videoProcessor->isOpened()) {
-                    is_running = true;
                 }
             } catch (const std::exception& e) {
                 std::cerr << "Error applying new configuration: " << e.what() << std::endl;

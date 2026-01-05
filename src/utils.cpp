@@ -39,6 +39,8 @@ void build_engine(const std::string& onnxModelPath,
     
     auto profile = builder->createOptimizationProfile();
     profile->setDimensions("input", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4{batchSize, 3, inputHeight, inputWidth});
+    profile->setDimensions("input", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4{batchSize, 3, inputHeight, inputWidth});
+    profile->setDimensions("input", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4{batchSize, 3, inputHeight, inputWidth});
     config->addOptimizationProfile(profile);
 
     nvinfer1::IHostMemory* engineData = builder->buildSerializedNetwork(*network, *config);
@@ -55,12 +57,12 @@ void build_engine(const std::string& onnxModelPath,
     engineFile.write(static_cast<const char*>(engineData->data()), engineData->size());
     engineFile.close();
 
-    // Clean up resources
+    // Clean up resources in correct order
     delete engineData;
     delete parser;
     delete network;
-    delete builder;
     delete config;
+    delete builder;
 
 }
 
