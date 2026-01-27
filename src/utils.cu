@@ -6,20 +6,20 @@
 # include <cuda_fp16.h>
 
 
-// // CUDA内核：HWC转NCHW (支持非连续内存)
+// // CUDA kernel: HWC to NCHW conversion (supports non-contiguous memory)
 // __global__ void HWC2CHW(const float* src, float* dst, int H, int W, int C, size_t src_step) {
 //     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 //     const int total = H * W * C;
-//     // 使用网格跨步循环处理所有像素
+//     // Use grid-stride loop to process all pixels
 //     for (; idx < total; idx += blockDim.x * gridDim.x) {
-//         int c = idx / (H * W);      // 计算通道维度
-//         int sp = idx % (H * W);      // 空间位置索引
-//         int h = sp / W;             // 行坐标
-//         int w = sp % W;             // 列坐标
+//         int c = idx / (H * W);      // Calculate channel dimension
+//         int sp = idx % (H * W);      // Spatial position index
+//         int h = sp / W;             // Row coordinate
+//         int w = sp % W;             // Column coordinate
         
-//         // 修正：使用传入的src_step计算源索引 (字节步长转浮点数步长)
+//         // Fix: Use passed src_step to calculate source index (convert byte step to float step)
 //         size_t src_index = h * (src_step / sizeof(float)) + w * C + c;
-//         dst[idx] = src[src_index];  // 直接写入目标位置
+//         dst[idx] = src[src_index];  // Directly write to target position
 //     }
 // }
 

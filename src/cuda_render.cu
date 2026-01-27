@@ -31,9 +31,9 @@ __global__ void render_heatmap_kernel(float* d_input, uchar4* d_output_texture, 
     int idx = y * width + x;
     float val = d_input[idx]; 
     
-    // 【核心修复】增加饱和截断 (Saturate)
-    // 如果 val > 1.0，强制设为 1.0；如果 val < 0.0，强制设为 0.0
-    // 这样 >1.0 的高热力区就会保持纯红，不会回卷变成其他颜色
+    // [Core Fix] Add saturation truncation
+    // If val > 1.0, force to 1.0; if val < 0.0, force to 0.0
+    // This way, high heat areas >1.0 will remain pure red and won't roll back to other colors
     val = fminf(fmaxf(val, 0.0f), 1.0f);
     
     unsigned char r, g, b;

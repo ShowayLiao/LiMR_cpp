@@ -1,0 +1,25 @@
+#pragma once
+#include <opencv2/opencv.hpp>
+#include <nppi.h>
+#include "../common/CudaMemory.hpp"
+
+class Preprocessor {
+public:
+    Preprocessor(int dst_width, int dst_height);
+    ~Preprocessor();
+
+    void process(const cv::Mat& src_img, void* d_dst_buffer, cudaStream_t stream);
+
+private:
+    int dst_w_;
+    int dst_h_;
+
+    void* h_pinned_buffer_ = nullptr;
+    size_t pinned_size_ = 0;
+
+    DeviceBuffer d_src_img_ = nullptr;
+    DeviceBuffer d_resize_temp_ = nullptr;
+
+    NppiSize oDstSize_;
+    NppiRect oDstRectROI_;
+};

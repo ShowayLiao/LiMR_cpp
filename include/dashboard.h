@@ -3,54 +3,68 @@
 #include <vector>
 #include <string>
 #include "imgui.h"
-#include "video_thread.h"
 #include "app_config.h"
-#include "utils.h" // 包含 build_engine 等声明
+#include "pipeline/Pipeline.h"
+#include "engine/TrtEngine.h"
+#include "utils.h" 
+#include <cuda_gl_interop.h>
 
 class Dashboard {
 public:
     Dashboard();
     ~Dashboard();
 
-    // 每帧调用此函数进行绘制和逻辑处理
-    void Render(int display_w, int display_h);
 
-    // 辅助：处理纹理更新
+    void InitResources();
+    
+    // Data update
+    void UpdateData(const pipeline::FrameTaskPtr& task);
+    
+    // Call this function every frame for rendering and logic processing
+    void Render(int display_w, int display_h);
+    
+    // Get texture IDs
+    void GetTextureIDs(unsigned int& tex_frame, unsigned int& tex_heatmap, unsigned int& tex_mask);
+
+    // Helper: Handle texture updates
     void UpdateTextures();
 
 private:
-    // --- 内部绘制方法 ---
+    // --- Internal drawing methods ---
     void SetupStyle();
     void DrawSidePanel(float width, float height);
     void DrawMainView(float start_x, float width, float height);
     
-    // --- 核心业务对象 (智能指针管理) ---
+    // --- Core business objects (managed by smart pointers) ---
     std::unique_ptr<AppConfig> appConfig;
-    std::unique_ptr<VideoThread::VideoCaptureThread> videoProcessor;
+    std::unique_ptr<trt::TrtEngine> engine;
+    std::unique_ptr<pipeline::Pipeline> pipeline;
 
-    // --- UI 状态变量 ---
+    // --- UI state variables ---
     bool is_initialized = false;
     bool is_running = false;
+    bool resources_initialized = false;
     
-    // 纹理句柄
-    unsigned int tex_frame = 0;   // 原始图
-    // [新增] 纯热力图纹理
+    // Texture handles
+    unsigned int tex_frame = 0;   
+    // [New] Pure heatmap texture
     unsigned int tex_heatmap = 0; 
-    unsigned int tex_overlay = 0; // 最终结果图
+    unsigned int tex_overlay = 0; 
+    
+    // CUDA-OpenGL Interop resources
+    cudaGraphicsResource_t cuda_res_heatmap = nullptr;
+    
+    // Current task data
+    pipeline::FrameTaskPtr current_task;
 
-    // --- 输入缓存 (ImGui 需要 char*) ---
-    char video_path[256] = "../../input/blade.avi";
+    // --- Input buffers (ImGui requires char*) ---
+    char video_path[256] = "./input/blade.avi";
     
-    // Engine路径输入
-    char engine_path_a[256] = "../../input/LiMR_student_16.engine";
-    char engine_path_b[256] = "../../input/LiMR_teacher_16.engine";
+    // Engine path input
+    char engine_path_a[256] = "./input/LiMR_merged.onnx";
     
-    int current_precision_idx = 0;
+    int current_precision_idx = 1; // Default to F16
     const char* precision_items[2] = { "F32", "F16 " };
-    
-    // 推理模式选择
-    int inference_mode_idx = 0; // 0: Single Engine, 1: Dual Engine
-    const char* inference_mode_items[2] = { "Single Engine", "Dual Engine" };
 
     float defect_threshold = 0.5f;
 };

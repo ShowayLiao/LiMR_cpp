@@ -1,10 +1,10 @@
+#include <GLFW/glfw3.h> // If OpenGL functions are needed
 #include "dashboard.h"
 #include "model_loader.h"
 #include <iostream>
 #include <fstream>
-#include <GLFW/glfw3.h> // 如果需要 OpenGL 函数
 
-// 辅助函数：更新纹理 (你可以放在 utils.h 里，这里为了方便直接写)
+// Helper function: Update texture (you can put this in utils.h, but for convenience it's written here directly)
 static void update_texture_internal(const cv::Mat& mat, unsigned int& texture_id) {
     if (mat.empty()) return;
     if (texture_id == 0) glGenTextures(1, &texture_id);
@@ -16,14 +16,129 @@ static void update_texture_internal(const cv::Mat& mat, unsigned int& texture_id
 }
 
 Dashboard::Dashboard() {
-    SetupStyle(); // 初始化时自动应用样式
+    SetupStyle(); // Apply style automatically during initialization
+    resources_initialized = false;
+}
+
+void Dashboard::InitResources() {
+    if (!resources_initialized) {
+        // Generate texture IDs
+        glGenTextures(1, &tex_frame);
+        glBindTexture(GL_TEXTURE_2D, tex_frame);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 256, 256, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+        
+        glGenTextures(1, &tex_heatmap);
+        glBindTexture(GL_TEXTURE_2D, tex_heatmap);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        // Key point: format is changed to GL_RGBA here
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 256, 256, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        
+        // Register resource (keep unchanged)
+        cudaGraphicsGLRegisterImage(&cuda_res_heatmap, tex_heatmap, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsWriteDiscard);
+        
+        // [Added] Register as CUDA resource
+        cudaGraphicsGLRegisterImage(&cuda_res_heatmap, tex_heatmap, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsWriteDiscard);
+        
+        glGenTextures(1, &tex_overlay);
+        glBindTexture(GL_TEXTURE_2D, tex_overlay);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 256, 256, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+        
+        // Print texture IDs to ensure they are not 0
+        // std::cout << "[Dashboard] Texture IDs generated: " << std::endl;
+        // std::cout << "  - tex_frame: " << tex_frame << std::endl;
+        // std::cout << "  - tex_heatmap: " << tex_heatmap << std::endl;
+        // std::cout << "  - tex_overlay: " << tex_overlay << std::endl;
+        
+        // Initialize with 256x256 black background texture
+        // Create black background data
+        std::vector<unsigned char> black_background(256 * 256 * 3, 0);
+        
+        // Update black background to textures
+        glBindTexture(GL_TEXTURE_2D, tex_frame);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 256, 256, 0, GL_RGB, GL_UNSIGNED_BYTE, black_background.data());
+        
+        glBindTexture(GL_TEXTURE_2D, tex_heatmap);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 256, 256, 0, GL_RGB, GL_UNSIGNED_BYTE, black_background.data());
+        
+        glBindTexture(GL_TEXTURE_2D, tex_overlay);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 256, 256, 0, GL_RGB, GL_UNSIGNED_BYTE, black_background.data());
+        
+        std::cout << "[Dashboard] Initialized textures with black background" << std::endl;
+        
+        resources_initialized = true;
+        std::cout << "[Dashboard] Resources initialized" << std::endl;
+    }
 }
 
 Dashboard::~Dashboard() {
+    if (cuda_res_heatmap) {
+        cudaGraphicsUnregisterResource(cuda_res_heatmap);
+        cuda_res_heatmap = nullptr;
+    }
     if (tex_frame) glDeleteTextures(1, &tex_frame);
     // [新增]
     if (tex_heatmap) glDeleteTextures(1, &tex_heatmap);
-    // if (tex_overlay) glDeleteTextures(1, &tex_overlay);
+    if (tex_overlay) glDeleteTextures(1, &tex_overlay);
+}
+
+void Dashboard::UpdateData(const pipeline::FrameTaskPtr& task) {
+    if (!task || !task->is_valid) return;
+    
+    // Save current task data
+    current_task = task;
+    
+    // If task contains valid data, update textures
+    if (!task->original_image.empty()) {
+        // Update original image texture
+        glBindTexture(GL_TEXTURE_2D, tex_frame);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, task->original_image.cols, task->original_image.rows, 0, GL_RGB, GL_UNSIGNED_BYTE, task->original_image.data);
+    }
+    
+    // Update heatmap texture (using CUDA-OpenGL Interop to update directly from device memory)
+    if (task->d_heatmap_gpu) {
+        cudaGraphicsMapResources(1, &cuda_res_heatmap, 0);
+        cudaArray_t tex_array;
+        cudaGraphicsSubResourceGetMappedArray(&tex_array, cuda_res_heatmap, 0, 0);
+        
+        // [Critical fix] Both Pitch and Width are 256 * 4
+        cudaMemcpy2DToArray(
+            tex_array, 0, 0,
+            task->d_heatmap_gpu.get(),
+            256 * 4 * sizeof(uint8_t), // Pitch (bytes per row in source data)
+            256 * 4 * sizeof(uint8_t), // Width (bytes to copy)
+            256,                       // Height
+            cudaMemcpyDeviceToDevice
+        );
+        
+        cudaGraphicsUnmapResources(1, &cuda_res_heatmap, 0);
+    }
+    
+    // Update overlay texture (using detection results)
+    // Prefer to use heatmap_vis as detection result
+    if (!task->heatmap_vis.empty()) {
+        // Update overlay texture
+        glBindTexture(GL_TEXTURE_2D, tex_overlay);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, task->heatmap_vis.cols, task->heatmap_vis.rows, 0, GL_RGB, GL_UNSIGNED_BYTE, task->heatmap_vis.data);
+    } else if (!task->original_image.empty()) {
+        // If no detection result, fallback to original image
+        glBindTexture(GL_TEXTURE_2D, tex_overlay);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, task->original_image.cols, task->original_image.rows, 0, GL_RGB, GL_UNSIGNED_BYTE, task->original_image.data);
+    }
+    
+    // For CUDA Interop mode, texture content is updated by PostProcessor, no need to call glTexImage2D here
+    // Just need to ensure texture ID is valid
+}
+
+void Dashboard::GetTextureIDs(unsigned int& tex_frame_out, unsigned int& tex_heatmap_out, unsigned int& tex_mask_out) {
+    tex_frame_out = tex_frame;
+    tex_heatmap_out = tex_heatmap;
+    tex_mask_out = tex_overlay;
 }
 
 void Dashboard::SetupStyle() {
@@ -40,29 +155,50 @@ void Dashboard::SetupStyle() {
     colors[ImGuiCol_Text]     = ImVec4(0.90f, 0.90f, 0.92f, 1.00f);
 }
 
-// 2. UpdateTextures 中增加热力图的上传
+// 2. Add heatmap upload in UpdateTextures
 void Dashboard::UpdateTextures() {
-    if (is_initialized && is_running && videoProcessor) {
-        if (videoProcessor->update(defect_threshold)) {
-            // [修改] 直接拿 GPU Texture ID
-            tex_frame   = videoProcessor->getResultFrameTexture();
-            tex_heatmap = videoProcessor->getResultHeatmapTexture();
-            
-            // Overlay 实际上就是 Frame，我们直接复用 ID 即可
-            tex_overlay = tex_frame;
+    if (is_initialized && is_running && pipeline) {
+        // Get output queue from pipeline
+        auto& output_queue = pipeline->getOutputQueue();
+        
+        // Try to get a task from the output queue
+        pipeline::FrameTaskPtr task;
+        if (output_queue.try_pop(task)) {
+            if (task->is_valid) {
+                // Use new UpdateData method to update textures
+                UpdateData(task);
+            }
         }
     }
 }
 
 void Dashboard::Render(int display_w, int display_h) {
-    // 更新后端逻辑
+    // Save current task for recycling after update
+    pipeline::FrameTaskPtr old_task = current_task;
+    
+    // Update backend logic
     UpdateTextures();
+
+    // Print texture IDs to ensure they are not 0
+    // static int render_count = 0;
+    // if (render_count % 30 == 0) { // Print every 30 frames
+    //     std::cout << "[Dashboard] Rendering frame " << render_count << std::endl;
+    //     std::cout << "  - tex_frame: " << tex_frame << std::endl;
+    //     std::cout << "  - tex_heatmap: " << tex_heatmap << std::endl;
+    //     std::cout << "  - tex_overlay: " << tex_overlay << std::endl;
+    // }
+    // render_count++;
 
     float sideBarWidth = 350.0f;
 
-    // 绘制两部分
+    // Draw two parts
     DrawSidePanel(sideBarWidth, (float)display_h);
     DrawMainView(sideBarWidth, (float)display_w - sideBarWidth, (float)display_h);
+    
+    // Recycle old task back to pool
+    if (old_task && pipeline) {
+        pipeline->return_task(old_task);
+    }
 }
 
 void Dashboard::DrawSidePanel(float width, float height) {
@@ -76,26 +212,28 @@ void Dashboard::DrawSidePanel(float width, float height) {
     ImGui::Separator();
     ImGui::Spacing();
 
-    // 状态
+    // Status
     ImGui::Text("STATUS: "); ImGui::SameLine();
     if (is_initialized) ImGui::TextColored(ImVec4(0, 1, 0, 1), "READY");
     else ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "CONFIGURING");
-    ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+    
+    // Display single task processing time
+    if (current_task) {
+        double processing_time = current_task->end_time - current_task->start_time;
+        ImGui::Text("Processing Time: %.3f ms", processing_time);
+    } else {
+        ImGui::Text("Processing Time: -- ms");
+    }
+    
     ImGui::Separator();
 
-    // 配置区
+    // Configuration section
     if (is_initialized) ImGui::BeginDisabled();
     ImGui::Text("Configuration");
     ImGui::InputText("Video", video_path, 256);
     
-    // 推理模式选择
-    ImGui::Combo("Inference Mode", &inference_mode_idx, inference_mode_items, 2);
-    
-    // Engine路径输入
-    ImGui::InputText("Engine Path A", engine_path_a, 256);
-    if (inference_mode_idx == 1) { // Dual Engine模式
-        ImGui::InputText("Engine Path B", engine_path_b, 256);
-    }
+    // Engine path input
+    ImGui::InputText("Model Path", engine_path_a, 256);
     
     ImGui::Combo("Precision", &current_precision_idx, precision_items, 2);
 
@@ -105,81 +243,48 @@ void Dashboard::DrawSidePanel(float width, float height) {
     ImGui::Separator();
     ImGui::Text("Inference Parameters");
     
-    // 滑块：范围 0.0 到 1.0
+    // Slider: range 0.0 to 1.0
     ImGui::SliderFloat("Threshold", &defect_threshold, 0.0f, 1.0f, "Conf: %.2f");
-    // 添加一句解释
+    // Add an explanation
     if (ImGui::IsItemHovered()) 
         ImGui::SetTooltip("Adjust sensitivity for defect contours");
 
     ImGui::Spacing();
     ImGui::Separator();
 
-    // ImGui::Spacing();
-    
-    // 按钮逻辑
+    // Button logic
     float btnH = 45.0f;
     if (!is_initialized) {
         if (ImGui::Button("INITIALIZE SYSTEM", ImVec2(-1, btnH))) {
             try {
-                // 这里调用你的 backend 初始化逻辑
+                // Call your backend initialization logic here
                 std::string type_str = precision_items[current_precision_idx];
+                trt::Precision precision = (type_str == "F16 ") ? trt::Precision::FP16 : trt::Precision::FP32;
                 
-                // 根据选择的模式设置推理模式
-                InferenceMode mode = (inference_mode_idx == 0) ? InferenceMode::SINGLE_ENGINE : InferenceMode::DUAL_ENGINE;
+                // Create configuration object
+                appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, engine_path_a, "", " ", type_str, InferenceMode::SINGLE_ENGINE));
                 
-                // 创建模型加载器
-                ModelLoader modelLoader("./.cache");
-                
-                try {
-                    // 使用默认参数处理模型文件
-                    int defaultWidth = 224;
-                    int defaultHeight = 224;
-                    int defaultBatchSize = 1;
-                    
-                    // 处理模型文件A
-                    std::string processedEngineA = modelLoader.processModel(engine_path_a, 
-                                                                          defaultWidth, 
-                                                                          defaultHeight, 
-                                                                          defaultBatchSize,
-                                                                          type_str);
-                    
-                    // 处理模型文件B（如果是双引擎模式）
-                    std::string processedEngineB = engine_path_b;
-                    if (mode == InferenceMode::DUAL_ENGINE && strlen(engine_path_b) > 0) {
-                        processedEngineB = modelLoader.processModel(engine_path_b, 
-                                                                    defaultWidth, 
-                                                                    defaultHeight, 
-                                                                    defaultBatchSize,
-                                                                    type_str);
-                    }
-                    
-                    // 创建配置对象，使用处理后的模型路径
-                    appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, processedEngineA, processedEngineB, " ", type_str, mode));
-                    
-                    // 验证处理后的模型文件是否存在
-                    if (!std::ifstream(processedEngineA).good()) {
-                        throw ModelLoaderException("Processed engine A file not found: " + processedEngineA);
-                    }
-                    if (mode == InferenceMode::DUAL_ENGINE && !processedEngineB.empty() && !std::ifstream(processedEngineB).good()) {
-                        throw ModelLoaderException("Processed engine B file not found: " + processedEngineB);
-                    }
-
-                    videoProcessor = std::unique_ptr<VideoThread::VideoCaptureThread>(new VideoThread::VideoCaptureThread(*appConfig));
-                } catch (const ModelLoaderException& e) {
-                    std::cerr << "[ERROR] Model processing failed: " << e.what() << std::endl;
-                    ImGui::OpenPopup("Error");
-                    return;
-                } catch (const std::exception& e) {
-                    std::cerr << "[ERROR] Initialization failed: " << e.what() << std::endl;
-                    ImGui::OpenPopup("Error");
+                // Create and load TensorRT engine
+                engine = std::make_unique<trt::TrtEngine>();
+                if (!engine->load(engine_path_a, precision)) {
+                    std::cerr << "Failed to load engine: " << engine_path_a << std::endl;
                     return;
                 }
-                if (videoProcessor->isOpened()) {
-                    is_initialized = true;
-                    is_running = true;
-                }
+                
+                // Create pipeline
+                std::cout << "[Dashboard] Creating pipeline with video source: " << video_path << std::endl;
+                pipeline = std::make_unique<pipeline::Pipeline>(video_path, 256, 256, engine.get());
+                
+                // Start pipeline
+                std::cout << "[Dashboard] Starting pipeline..." << std::endl;
+                pipeline->start();
+                std::cout << "[Dashboard] Pipeline started successfully" << std::endl;
+                
+                is_initialized = true;
+                is_running = true;
+                std::cout << "[Dashboard] System initialized successfully" << std::endl;
             } catch (const std::exception& e) {
-                std::cerr << e.what() << std::endl;
+                std::cerr << "Initialization failed: " << e.what() << std::endl;
             }
         }
     } else {
@@ -192,72 +297,44 @@ void Dashboard::DrawSidePanel(float width, float height) {
         if (ImGui::Button("RESET", ImVec2(width * 0.45f, btnH))) {
             is_running = false;
             is_initialized = false;
-            videoProcessor.reset();
+            pipeline.reset();
+            engine.reset();
             appConfig.reset();
+            
+            // Reset textures
+            tex_frame = 0;
+            tex_heatmap = 0;
+            tex_overlay = 0;
         }
         
-        // Apply & Reload 按钮
+        // Apply & Reload button
         ImGui::Spacing();
         if (ImGui::Button("Apply & Reload", ImVec2(-1, btnH))) {
             try {
-                // 停止当前视频线程
+                // Stop current pipeline
                 is_running = false;
                 
-                // 更新配置
+                // Update configuration
                 std::string type_str = precision_items[current_precision_idx];
-                InferenceMode mode = (inference_mode_idx == 0) ? InferenceMode::SINGLE_ENGINE : InferenceMode::DUAL_ENGINE;
+                trt::Precision precision = (type_str == "F16 ") ? trt::Precision::FP16 : trt::Precision::FP32;
                 
-                // 创建模型加载器
-                ModelLoader modelLoader("./.cache");
+                // Update configuration object
+                appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, engine_path_a, "", " ", type_str, InferenceMode::SINGLE_ENGINE));
                 
-                try {
-                    // 使用默认参数处理模型文件
-                    int defaultWidth = 224;
-                    int defaultHeight = 224;
-                    int defaultBatchSize = 1;
-                    
-                    // 处理模型文件A
-                    std::string processedEngineA = modelLoader.processModel(engine_path_a, 
-                                                                          defaultWidth, 
-                                                                          defaultHeight, 
-                                                                          defaultBatchSize,
-                                                                          type_str);
-                    
-                    // 处理模型文件B（如果是双引擎模式）
-                    std::string processedEngineB = engine_path_b;
-                    if (mode == InferenceMode::DUAL_ENGINE && strlen(engine_path_b) > 0) {
-                        processedEngineB = modelLoader.processModel(engine_path_b, 
-                                                                    defaultWidth, 
-                                                                    defaultHeight, 
-                                                                    defaultBatchSize,
-                                                                    type_str);
-                    }
-                    
-                    // 创建新的配置对象，使用处理后的模型路径
-                    appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, processedEngineA, processedEngineB, " ", type_str, mode));
-                    
-                    // 验证处理后的模型文件是否存在
-                    if (!std::ifstream(processedEngineA).good()) {
-                        throw ModelLoaderException("Processed engine A file not found: " + processedEngineA);
-                    }
-                    if (mode == InferenceMode::DUAL_ENGINE && !processedEngineB.empty() && !std::ifstream(processedEngineB).good()) {
-                        throw ModelLoaderException("Processed engine B file not found: " + processedEngineB);
-                    }
-                    
-                    // 重新初始化视频处理器
-                    videoProcessor = std::unique_ptr<VideoThread::VideoCaptureThread>(new VideoThread::VideoCaptureThread(*appConfig));
-                    if (videoProcessor->isOpened()) {
-                        is_running = true;
-                    }
-                } catch (const ModelLoaderException& e) {
-                    std::cerr << "[ERROR] Model processing failed: " << e.what() << std::endl;
-                    ImGui::OpenPopup("Error");
-                    return;
-                } catch (const std::exception& e) {
-                    std::cerr << "[ERROR] Initialization failed: " << e.what() << std::endl;
-                    ImGui::OpenPopup("Error");
+                // Recreate and load TensorRT engine
+                engine = std::make_unique<trt::TrtEngine>();
+                if (!engine->load(engine_path_a, precision)) {
+                    std::cerr << "Failed to load engine: " << engine_path_a << std::endl;
                     return;
                 }
+                
+                // Recreate pipeline
+                pipeline = std::make_unique<pipeline::Pipeline>(video_path, 256, 256, engine.get());
+                
+                // Start pipeline
+                pipeline->start();
+                
+                is_running = true;
             } catch (const std::exception& e) {
                 std::cerr << "Error applying new configuration: " << e.what() << std::endl;
             }
@@ -271,7 +348,7 @@ void Dashboard::DrawMainView(float start_x, float width, float height) {
     ImGui::SetNextWindowPos(ImVec2(start_x, 0));
     ImGui::SetNextWindowSize(ImVec2(width, height));
     
-    // 背景设黑
+    // Set background to black
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.08f, 0.08f, 1.0f));
     ImGui::Begin("ViewPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
     // ImGui::PopStyleColor();
@@ -279,23 +356,31 @@ void Dashboard::DrawMainView(float start_x, float width, float height) {
     // ImGui::Begin("ViewPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
     // ImGui::PopStyleColor();
 
-    // [修改判断条件] 检查三个纹理是否都准备好了
+    // [Modified condition] Check if all three textures are ready
     if (tex_frame != 0 && tex_overlay != 0 && tex_heatmap != 0) {
-        // --- 自适应三栏布局计算 ---
-        float pad = 15.0f; // 图片之间的间距
-        // 总宽度减去左、中1、中2、右四个间隙
+        // --- Adaptive three-column layout calculation ---
+        float pad = 15.0f; // Spacing between images
+        // Total width minus left, middle1, middle2, right four gaps
         float availW = width - pad * 4; 
-        // 分成三份
+        // Divide into three parts
         float targetW = availW / 3.0f;
-        float targetH = targetW; // 假设 1:1 比例
+        float targetH = targetW; // Assume 1:1 ratio
+        
+        // Print layout calculation dimensions
+        // std::cout << "[Dashboard] Layout calculation: " << std::endl;
+        // std::cout << "  - View width: " << width << std::endl;
+        // std::cout << "  - View height: " << height << std::endl;
+        // std::cout << "  - Available width: " << availW << std::endl;
+        // std::cout << "  - Target width: " << targetW << std::endl;
+        // std::cout << "  - Target height: " << targetH << std::endl;
 
-        // 高度限制检查
+        // Height limit check
         if (targetH > height - 80) { 
             targetH = height - 80;
             targetW = targetH;
         }
 
-        // 整体居中计算
+        // Overall center calculation
         float totalContentWidth = targetW * 3 + pad * 2;
         float cursorX = (width - totalContentWidth) / 2.0f;
         float cursorY = (height - targetH) / 2.0f;
@@ -304,9 +389,9 @@ void Dashboard::DrawMainView(float start_x, float width, float height) {
 
         ImGui::SetCursorPos(ImVec2(cursorX, cursorY));
 
-        // --- 绘制三张图 ---
+        // --- Draw three images ---
         
-        // 1. 原始图
+        // 1. Original image
         ImGui::BeginGroup();
         ImGui::Text("Original Input");
         ImGui::Image((void*)(intptr_t)tex_frame, ImVec2(targetW, targetH));
@@ -314,7 +399,7 @@ void Dashboard::DrawMainView(float start_x, float width, float height) {
 
         ImGui::SameLine(0, pad);
 
-        // 2. [新增] 纯热力图
+        // 2. [Added] Pure heatmap
         ImGui::BeginGroup();
         ImGui::Text("Heatmap View");
         ImGui::Image((void*)(intptr_t)tex_heatmap, ImVec2(targetW, targetH));
@@ -322,7 +407,7 @@ void Dashboard::DrawMainView(float start_x, float width, float height) {
 
         ImGui::SameLine(0, pad);
 
-        // 3. 最终结果图（红框在原图上）
+        // 3. Final result image (red boxes on original image)
         // ImGui::BeginGroup();
         // ImGui::Text("Defect Detection");
         // ImGui::Image((void*)(intptr_t)tex_overlay, ImVec2(targetW, targetH));
@@ -332,52 +417,61 @@ void Dashboard::DrawMainView(float start_x, float width, float height) {
         ImGui::BeginGroup();
         ImGui::Text("Defect Detection");
 
-        // [步骤 1] 获取当前图片在屏幕上的起始绝对坐标
+        // [Step 1] Get the starting absolute coordinates of the current image on the screen
         ImVec2 p_min = ImGui::GetCursorScreenPos();
 
-        // [步骤 2] 绘制底图
+        // [Step 2] Draw the base image
         ImGui::Image((void*)(intptr_t)tex_overlay, ImVec2(targetW, targetH));
 
-        // [步骤 3] 获取画笔，绘制红框
-        auto rects = videoProcessor->getDefectRects();
-        
-        if (!rects.empty() && appConfig) { // 确保 appConfig 存在
+        // [Step 3] Get the drawing pen and draw red boxes
+        // TODO: Get defect rectangles from the task object
+        // For now, we'll just draw a dummy rectangle
+        if (appConfig) { // Ensure appConfig exists
             ImDrawList* draw_list = ImGui::GetWindowDrawList();
             
-            // 【核心修复：计算缩放比例】
-            // 获取推理时使用的基准分辨率 (后端是基于这个分辨率算的坐标)
-            // 我们从配置对象中读取这些值，确保通用性
-            float baseW = (float)appConfig->inputWidth;  // 例如 448.0f
-            float baseH = (float)appConfig->inputHeight; // 例如 448.0f
+            // 【Core fix: Calculate scaling ratio】
+            // Get the base resolution used during inference (backend calculates coordinates based on this resolution)
+            // We read these values from the configuration object to ensure generality
+            float baseW = 256.0f;  // Fixed to 256x256
+            float baseH = 256.0f; // Fixed to 256x256
 
-            // 防止除以零的保护措施
+            // Protection against division by zero
             if (baseW > 0 && baseH > 0) {
-                 // 计算缩放因子： (当前显示的宽高 / 基准宽高)
+                // Calculate scaling factors: (current display width/height / base width/height)
                 float scale_x = targetW / baseW;
                 float scale_y = targetH / baseH;
 
-                for (const auto& rect : rects) {
-                    // 【核心修复：应用缩放】
-                    // 屏幕绝对坐标 X = 图片起始X + (原始坐标X * 缩放因子X)
-                    float x = p_min.x + rect.x * scale_x;
-                    float y = p_min.y + rect.y * scale_y;
-                    float w = rect.width * scale_x;
-                    float h = rect.height * scale_y;
+                // Get detection boxes from current task data
+                if (current_task && current_task->is_valid) {
+                    // Iterate through peaks data and draw detection boxes
+                    for (const auto& peak : current_task->peaks) {
+                        // Assume peak's x, y are center coordinates, create a rectangle centered at this point
+                        int rect_width = 30; // Rectangle width
+                        int rect_height = 30; // Rectangle height
+                        int rect_x = peak.x - rect_width / 2;
+                        int rect_y = peak.y - rect_height / 2;
+                        
+                        // Calculate screen coordinates
+                        float x = p_min.x + rect_x * scale_x;
+                        float y = p_min.y + rect_y * scale_y;
+                        float w = rect_width * scale_x;
+                        float h = rect_height * scale_y;
 
-                    // 绘制矩形
-                    draw_list->AddRect(
-                        ImVec2(x, y),          // 左上角
-                        ImVec2(x + w, y + h),  // 右下角
-                        IM_COL32(255, 0, 0, 255), // 红色
-                        0.0f, 0, 2.0f // 无圆角，线宽2.0
-                    );
+                        // Draw rectangle
+                        draw_list->AddRect(
+                            ImVec2(x, y),          // Top-left corner
+                            ImVec2(x + w, y + h),  // Bottom-right corner
+                            IM_COL32(255, 0, 0, 255), // Red color
+                            0.0f, 0, 2.0f // No rounded corners, line width 2.0
+                        );
+                    }
                 }
             }
         }
         ImGui::EndGroup();
 
     } else {
-        // 显示等待文字
+        // Display waiting text
         const char* txt = "WAITING FOR SIGNAL...";
         ImVec2 txtSize = ImGui::CalcTextSize(txt);
         ImGui::SetCursorPos(ImVec2((width - txtSize.x) / 2, (height - txtSize.y) / 2));

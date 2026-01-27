@@ -1,6 +1,56 @@
 .vs/
 .vscode/
+.build/
 build/
 bin/
 input/
 3rdparty/
+
+# Cache directories
+.cache/
+
+# Model files
+models/*.engine
+models/*.onnx
+
+# Output files
+output_*.png
+output/
+
+# Log files
+*.log
+
+# IDE and editor files
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+Thumbs.db
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+
+# Binary files
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Torch and CUDA files
+libtorch/
+cuda/
+
+# TensorRT files
+TensorRT-*/
