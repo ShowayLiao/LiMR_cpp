@@ -22,6 +22,7 @@ public:
     void start();
     void stop();
     bool isRunning() const;
+    void setThreshold(float threshold);
 
 private:
     void run();
@@ -29,14 +30,12 @@ private:
     SafeQueue<FrameTaskPtr>& input_queue_;
     SafeQueue<FrameTaskPtr>& output_queue_;
     trt::TrtEngine* engine_;
-    
     Preprocessor preprocessor_;
     PostProcessor postprocessor_;
-    
+    bool running_;
     std::thread thread_;
-    std::atomic<bool> running_;
-    
     cudaStream_t stream_;
+    float threshold_ = 0.5f;
 };
 
 } // namespace pipeline

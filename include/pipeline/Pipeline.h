@@ -19,6 +19,7 @@ public:
 
     SafeQueue<FrameTaskPtr>& getOutputQueue();
 
+    void setThreshold(float threshold);
 
     FrameTaskPtr get_empty_task();
     void return_task(FrameTaskPtr task);

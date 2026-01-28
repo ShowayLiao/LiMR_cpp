@@ -45,6 +45,11 @@ SafeQueue<FrameTaskPtr>& Pipeline::getOutputQueue() {
     return output_queue_;
 }
 
+void Pipeline::setThreshold(float threshold) {
+    inference_thread_.setThreshold(threshold);
+    std::cout << "[Pipeline] Threshold set to: " << threshold << std::endl;
+}
+
 FrameTaskPtr Pipeline::get_empty_task() {
     FrameTaskPtr task;
     if (task_pool_.try_pop(task)) {

@@ -36,8 +36,7 @@ void InferenceThread::start() {
 void InferenceThread::stop() {
     if (running_) {
         running_ = false;
-        // Shutdown the input queue to unblock the pop() call
-        input_queue_.shutdown();
+        // Don't shutdown the queue here, let the thread finish processing
         if (thread_.joinable()) {
             thread_.join();
         }
@@ -47,6 +46,11 @@ void InferenceThread::stop() {
 
 bool InferenceThread::isRunning() const {
     return running_;
+}
+
+void InferenceThread::setThreshold(float threshold) {
+    threshold_ = threshold;
+    std::cout << "[InferenceThread] Threshold set to: " << threshold << std::endl;
 }
 
 void InferenceThread::run() {
@@ -73,7 +77,7 @@ void InferenceThread::run() {
             engine_->infer(task->d_input.get(), 1);
 
             // Step 3: Postprocessing (GPU-based)
-            postprocessor_.process(engine_, task, 0.5f, stream_);
+            postprocessor_.process(engine_, task, threshold_, stream_);
 
             // Record end time
             task->end_time = static_cast<double>(std::clock()) / CLOCKS_PER_SEC;

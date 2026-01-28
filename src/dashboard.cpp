@@ -1,8 +1,13 @@
 #include <GLFW/glfw3.h> // If OpenGL functions are needed
 #include "dashboard.h"
-#include "model_loader.h"
 #include <iostream>
 #include <fstream>
+#include <algorithm>
+#include <thread>
+#include "pipeline/Preprocessor.h"
+#include "pipeline/Postprocessor.h"
+#include "common/CudaMemory.hpp"
+#include "pipeline/Pipeline.h"
 
 // Helper function: Update texture (you can put this in utils.h, but for convenience it's written here directly)
 static void update_texture_internal(const cv::Mat& mat, unsigned int& texture_id) {
@@ -13,6 +18,69 @@ static void update_texture_internal(const cv::Mat& mat, unsigned int& texture_id
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, mat.cols, mat.rows, 0, GL_RGB, GL_UNSIGNED_BYTE, mat.data);
+}
+
+// Input type enumeration
+enum class InputType {
+    UNKNOWN,
+    IMAGE,
+    VIDEO,
+    CAMERA
+};
+
+// Helper function: Detect input type
+static InputType detect_input_type(const std::string& input) {
+    // Check if input is a binary digit (0 or 1) for camera
+    if (input == "0" || input == "1") {
+        return InputType::CAMERA;
+    }
+    
+    // Check if input is an image file
+    std::string lower_input = input;
+    std::transform(lower_input.begin(), lower_input.end(), lower_input.begin(), ::tolower);
+    
+    std::vector<std::string> image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"};
+    for (const auto& ext : image_extensions) {
+        if (lower_input.find(ext) != std::string::npos) {
+            return InputType::IMAGE;
+        }
+    }
+    
+    // Check if input is a video file
+    std::vector<std::string> video_extensions = {".avi", ".mp4", ".mov", ".mkv", ".wmv", ".flv"};
+    for (const auto& ext : video_extensions) {
+        if (lower_input.find(ext) != std::string::npos) {
+            return InputType::VIDEO;
+        }
+    }
+    
+    return InputType::UNKNOWN;
+}
+
+// Helper function: Process image input
+static bool process_image_input(const std::string& image_path, cv::Mat& out_image) {
+    out_image = cv::imread(image_path);
+    return !out_image.empty();
+}
+
+// Helper function: Check if input is a valid video file
+static bool is_valid_video_file(const std::string& video_path) {
+    cv::VideoCapture cap(video_path);
+    bool isValid = cap.isOpened();
+    if (isValid) {
+        cap.release();
+    }
+    return isValid;
+}
+
+// Helper function: Check if input is a valid camera index
+static bool is_valid_camera(int camera_index) {
+    cv::VideoCapture cap(camera_index);
+    bool isValid = cap.isOpened();
+    if (isValid) {
+        cap.release();
+    }
+    return isValid;
 }
 
 Dashboard::Dashboard() {
@@ -37,10 +105,7 @@ void Dashboard::InitResources() {
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 256, 256, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
         glBindTexture(GL_TEXTURE_2D, 0);
         
-        // Register resource (keep unchanged)
-        cudaGraphicsGLRegisterImage(&cuda_res_heatmap, tex_heatmap, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsWriteDiscard);
-        
-        // [Added] Register as CUDA resource
+        // Register as CUDA resource
         cudaGraphicsGLRegisterImage(&cuda_res_heatmap, tex_heatmap, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsWriteDiscard);
         
         glGenTextures(1, &tex_overlay);
@@ -92,6 +157,11 @@ void Dashboard::UpdateData(const pipeline::FrameTaskPtr& task) {
     
     // Save current task data
     current_task = task;
+    
+    // Update recent processing time
+    if (task->end_time > task->start_time) {
+        recent_processing_time = task->end_time - task->start_time;
+    }
     
     // If task contains valid data, update textures
     if (!task->original_image.empty()) {
@@ -170,6 +240,12 @@ void Dashboard::UpdateTextures() {
             }
         }
     }
+    // For image input (is_running == false), still update textures if we have a current task
+    // This ensures the image is displayed even after processing is complete
+    if (is_initialized && !is_running && current_task) {
+        // Update textures with current task data
+        UpdateData(current_task);
+    }
 }
 
 void Dashboard::Render(int display_w, int display_h) {
@@ -217,10 +293,9 @@ void Dashboard::DrawSidePanel(float width, float height) {
     if (is_initialized) ImGui::TextColored(ImVec4(0, 1, 0, 1), "READY");
     else ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "CONFIGURING");
     
-    // Display single task processing time
-    if (current_task) {
-        double processing_time = current_task->end_time - current_task->start_time;
-        ImGui::Text("Processing Time: %.3f ms", processing_time);
+    // Display processing time (using recent value to avoid flickering)
+    if (recent_processing_time > 0) {
+        ImGui::Text("Processing Time: %.3f ms", recent_processing_time * 1000.0);
     } else {
         ImGui::Text("Processing Time: -- ms");
     }
@@ -228,7 +303,6 @@ void Dashboard::DrawSidePanel(float width, float height) {
     ImGui::Separator();
 
     // Configuration section
-    if (is_initialized) ImGui::BeginDisabled();
     ImGui::Text("Configuration");
     ImGui::InputText("Video", video_path, 256);
     
@@ -237,14 +311,18 @@ void Dashboard::DrawSidePanel(float width, float height) {
     
     ImGui::Combo("Precision", &current_precision_idx, precision_items, 2);
 
-    if (is_initialized) ImGui::EndDisabled();
-
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Text("Inference Parameters");
     
     // Slider: range 0.0 to 1.0
-    ImGui::SliderFloat("Threshold", &defect_threshold, 0.0f, 1.0f, "Conf: %.2f");
+    if (ImGui::SliderFloat("Threshold", &defect_threshold, 0.0f, 1.0f, "Conf: %.2f")) {
+        // Update threshold in pipeline when slider value changes
+        if (pipeline && is_initialized) {
+            pipeline->setThreshold(defect_threshold);
+            std::cout << "[Dashboard] Threshold updated to: " << defect_threshold << std::endl;
+        }
+    }
     // Add an explanation
     if (ImGui::IsItemHovered()) 
         ImGui::SetTooltip("Adjust sensitivity for defect contours");
@@ -261,40 +339,157 @@ void Dashboard::DrawSidePanel(float width, float height) {
                 std::string type_str = precision_items[current_precision_idx];
                 trt::Precision precision = (type_str == "F16 ") ? trt::Precision::FP16 : trt::Precision::FP32;
                 
-                // Create configuration object
-                appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, engine_path_a, "", " ", type_str, InferenceMode::SINGLE_ENGINE));
+                // Detect input type
+                std::string input_str = video_path;
+                InputType input_type = detect_input_type(input_str);
                 
-                // Create and load TensorRT engine
-                engine = std::make_unique<trt::TrtEngine>();
-                if (!engine->load(engine_path_a, precision)) {
-                    std::cerr << "Failed to load engine: " << engine_path_a << std::endl;
-                    return;
+                std::cout << "[Dashboard] Input type detected: ";
+                switch (input_type) {
+                    case InputType::IMAGE:
+                        std::cout << "IMAGE" << std::endl;
+                        break;
+                    case InputType::VIDEO:
+                        std::cout << "VIDEO" << std::endl;
+                        break;
+                    case InputType::CAMERA:
+                        std::cout << "CAMERA" << std::endl;
+                        break;
+                    default:
+                        std::cout << "UNKNOWN" << std::endl;
+                        break;
                 }
                 
-                // Create pipeline
-                std::cout << "[Dashboard] Creating pipeline with video source: " << video_path << std::endl;
-                pipeline = std::make_unique<pipeline::Pipeline>(video_path, 256, 256, engine.get());
-                
-                // Start pipeline
-                std::cout << "[Dashboard] Starting pipeline..." << std::endl;
-                pipeline->start();
-                std::cout << "[Dashboard] Pipeline started successfully" << std::endl;
-                
-                is_initialized = true;
-                is_running = true;
-                std::cout << "[Dashboard] System initialized successfully" << std::endl;
+                // Handle different input types
+                if (input_type == InputType::IMAGE) {
+                    // Process image input
+                    cv::Mat image;
+                    if (process_image_input(input_str, image)) {
+                        std::cout << "[Dashboard] Image loaded successfully: " << image.cols << "x" << image.rows << std::endl;
+                        
+                        // Create configuration object
+                        appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, engine_path_a, "", " ", type_str, InferenceMode::SINGLE_ENGINE));
+                        
+                        // Create and load TensorRT engine
+                        engine = std::make_unique<trt::TrtEngine>();
+                        if (!engine->load(engine_path_a, precision)) {
+                            std::cerr << "Failed to load engine: " << engine_path_a << std::endl;
+                            return;
+                        }
+                        
+                        // Initialize resources if not already initialized
+                        if (!resources_initialized) {
+                            InitResources();
+                        }
+                        
+                        // For image input, use the same pipeline approach as video
+                        // Create pipeline
+                        pipeline = std::make_unique<pipeline::Pipeline>(video_path, 256, 256, engine.get());
+                        
+                        // Start pipeline
+                        pipeline->start();
+                        
+                        // Set threshold
+                        pipeline->setThreshold(defect_threshold);
+                        std::cout << "[Dashboard] Threshold set to: " << defect_threshold << std::endl;
+                        
+                        // Give the pipeline some time to process the image
+                        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                        
+                        // Try to get the processed task from the output queue
+                        pipeline::FrameTaskPtr task;
+                        auto& output_queue = pipeline->getOutputQueue();
+                        
+                        // Wait for a short time to get the processed task
+                        for (int i = 0; i < 10; i++) {
+                            if (output_queue.try_pop(task)) {
+                                if (task->is_valid) {
+                                    // Update textures with the processed image
+                                    UpdateData(task);
+                                    break;
+                                }
+                            }
+                            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        }
+                        
+                        // Stop the pipeline since we only need to process one image
+                        pipeline->stop();
+                        
+                        // Set initialized flag
+                        is_initialized = true;
+                        is_running = false; // Image processing is one-time
+                        std::cout << "[Dashboard] Image processed successfully" << std::endl;
+                    } else {
+                        std::cerr << "[Dashboard] Failed to load image: " << input_str << std::endl;
+                        return;
+                    }
+                } else if (input_type == InputType::VIDEO || input_type == InputType::CAMERA) {
+                    // For video or camera input, use the existing pipeline
+                    // Create configuration object
+                    appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, engine_path_a, "", " ", type_str, InferenceMode::SINGLE_ENGINE));
+                    
+                    // Create and load TensorRT engine
+                    engine = std::make_unique<trt::TrtEngine>();
+                    if (!engine->load(engine_path_a, precision)) {
+                        std::cerr << "Failed to load engine: " << engine_path_a << std::endl;
+                        return;
+                    }
+                    
+                    // Create pipeline
+                    std::cout << "[Dashboard] Creating pipeline with video source: " << video_path << std::endl;
+                    pipeline = std::make_unique<pipeline::Pipeline>(video_path, 256, 256, engine.get());
+                    
+                    // Initialize resources if not already initialized
+                    if (!resources_initialized) {
+                        InitResources();
+                    }
+                    
+                    // Start pipeline
+                    std::cout << "[Dashboard] Starting pipeline..." << std::endl;
+                    pipeline->start();
+                    std::cout << "[Dashboard] Pipeline started successfully" << std::endl;
+                    
+                    // Set threshold
+                    pipeline->setThreshold(defect_threshold);
+                    std::cout << "[Dashboard] Threshold set to: " << defect_threshold << std::endl;
+                    
+                    is_initialized = true;
+                    is_running = true;
+                    std::cout << "[Dashboard] System initialized successfully" << std::endl;
+                } else {
+                    std::cerr << "[Dashboard] Unknown input type: " << input_str << std::endl;
+                    return;
+                }
             } catch (const std::exception& e) {
                 std::cerr << "Initialization failed: " << e.what() << std::endl;
             }
         }
     } else {
         if (is_running) {
-            if (ImGui::Button("PAUSE", ImVec2(width * 0.45f, btnH))) is_running = false;
+            if (ImGui::Button("PAUSE", ImVec2(width * 0.45f, btnH))) {
+                is_running = false;
+                if (pipeline) {
+                    pipeline->stop();
+                    std::cout << "[Dashboard] Pipeline paused" << std::endl;
+                }
+            }
         } else {
-            if (ImGui::Button("RESUME", ImVec2(width * 0.45f, btnH))) is_running = true;
+            if (ImGui::Button("RESUME", ImVec2(width * 0.45f, btnH))) {
+                is_running = true;
+                if (pipeline) {
+                    pipeline->start();
+                    std::cout << "[Dashboard] Pipeline resumed" << std::endl;
+                }
+            }
         }
         ImGui::SameLine();
         if (ImGui::Button("RESET", ImVec2(width * 0.45f, btnH))) {
+            // Stop pipeline first before destroying it
+            if (pipeline) {
+                pipeline->stop();
+                // Give some time for threads to stop properly
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            
             is_running = false;
             is_initialized = false;
             pipeline.reset();
@@ -305,36 +500,170 @@ void Dashboard::DrawSidePanel(float width, float height) {
             tex_frame = 0;
             tex_heatmap = 0;
             tex_overlay = 0;
+            
+            // Reset resources initialized flag to force reinitialization
+            resources_initialized = false;
+            
+            // Reset CUDA resources
+            if (cuda_res_heatmap) {
+                cudaGraphicsUnregisterResource(cuda_res_heatmap);
+                cuda_res_heatmap = nullptr;
+            }
+            
+            // Reset current task
+            current_task.reset();
         }
         
         // Apply & Reload button
         ImGui::Spacing();
         if (ImGui::Button("Apply & Reload", ImVec2(-1, btnH))) {
             try {
-                // Stop current pipeline
+                // Stop and clean up existing pipeline
+                if (pipeline) {
+                    pipeline->stop();
+                    // Give some time for threads to stop properly
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+                
                 is_running = false;
+                is_initialized = false;
+                pipeline.reset();
+                engine.reset();
+                appConfig.reset();
+                
+                // Reset resources initialized flag to force reinitialization
+                resources_initialized = false;
+                
+                // Reset CUDA resources
+                if (cuda_res_heatmap) {
+                    cudaGraphicsUnregisterResource(cuda_res_heatmap);
+                    cuda_res_heatmap = nullptr;
+                }
+                
+                // Reset current task
+                current_task.reset();
                 
                 // Update configuration
                 std::string type_str = precision_items[current_precision_idx];
                 trt::Precision precision = (type_str == "F16 ") ? trt::Precision::FP16 : trt::Precision::FP32;
                 
-                // Update configuration object
-                appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, engine_path_a, "", " ", type_str, InferenceMode::SINGLE_ENGINE));
+                // Detect input type
+                std::string input_str = video_path;
+                InputType input_type = detect_input_type(input_str);
                 
-                // Recreate and load TensorRT engine
-                engine = std::make_unique<trt::TrtEngine>();
-                if (!engine->load(engine_path_a, precision)) {
-                    std::cerr << "Failed to load engine: " << engine_path_a << std::endl;
-                    return;
+                std::cout << "[Dashboard] Input type detected: ";
+                switch (input_type) {
+                    case InputType::IMAGE:
+                        std::cout << "IMAGE" << std::endl;
+                        break;
+                    case InputType::VIDEO:
+                        std::cout << "VIDEO" << std::endl;
+                        break;
+                    case InputType::CAMERA:
+                        std::cout << "CAMERA" << std::endl;
+                        break;
+                    default:
+                        std::cout << "UNKNOWN" << std::endl;
+                        break;
                 }
                 
-                // Recreate pipeline
-                pipeline = std::make_unique<pipeline::Pipeline>(video_path, 256, 256, engine.get());
-                
-                // Start pipeline
-                pipeline->start();
-                
-                is_running = true;
+                // Handle different input types
+                if (input_type == InputType::IMAGE) {
+                    // Process image input
+                    cv::Mat image;
+                    if (process_image_input(input_str, image)) {
+                        std::cout << "[Dashboard] Image loaded successfully: " << image.cols << "x" << image.rows << std::endl;
+                        
+                        // Update configuration object
+                        appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, engine_path_a, "", " ", type_str, InferenceMode::SINGLE_ENGINE));
+                        
+                        // Recreate and load TensorRT engine
+                        engine = std::make_unique<trt::TrtEngine>();
+                        if (!engine->load(engine_path_a, precision)) {
+                            std::cerr << "Failed to load engine: " << engine_path_a << std::endl;
+                            return;
+                        }
+                        
+                        // Initialize resources if not already initialized
+                        if (!resources_initialized) {
+                            InitResources();
+                        }
+                        
+                        // For image input, use the same pipeline approach as video
+                        // Create pipeline
+                        pipeline = std::make_unique<pipeline::Pipeline>(video_path, 256, 256, engine.get());
+                        
+                        // Start pipeline
+                        pipeline->start();
+                        
+                        // Set threshold
+                        pipeline->setThreshold(defect_threshold);
+                        std::cout << "[Dashboard] Threshold set to: " << defect_threshold << std::endl;
+                        
+                        // Give the pipeline some time to process the image
+                        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                        
+                        // Try to get the processed task from the output queue
+                        pipeline::FrameTaskPtr task;
+                        auto& output_queue = pipeline->getOutputQueue();
+                        
+                        // Wait for a short time to get the processed task
+                        for (int i = 0; i < 10; i++) {
+                            if (output_queue.try_pop(task)) {
+                                if (task->is_valid) {
+                                    // Update textures with the processed image
+                                    UpdateData(task);
+                                    break;
+                                }
+                            }
+                            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        }
+                        
+                        // Stop the pipeline since we only need to process one image
+                        pipeline->stop();
+                        
+                        // Set running flag
+                        is_running = false; // Image processing is one-time
+                        is_initialized = true;
+                        std::cout << "[Dashboard] Image processed successfully" << std::endl;
+                    } else {
+                        std::cerr << "[Dashboard] Failed to load image: " << input_str << std::endl;
+                        return;
+                    }
+                } else if (input_type == InputType::VIDEO || input_type == InputType::CAMERA) {
+                    // For video or camera input, use the existing pipeline
+                    // Update configuration object
+                    appConfig = std::unique_ptr<AppConfig>(new AppConfig(video_path, engine_path_a, "", " ", type_str, InferenceMode::SINGLE_ENGINE));
+                    
+                    // Recreate and load TensorRT engine
+                    engine = std::make_unique<trt::TrtEngine>();
+                    if (!engine->load(engine_path_a, precision)) {
+                        std::cerr << "Failed to load engine: " << engine_path_a << std::endl;
+                        return;
+                    }
+                    
+                    // Initialize resources if not already initialized
+                    if (!resources_initialized) {
+                        InitResources();
+                    }
+                    
+                    // Recreate pipeline
+                    pipeline = std::make_unique<pipeline::Pipeline>(video_path, 256, 256, engine.get());
+                    
+                    // Start pipeline
+                    pipeline->start();
+                    
+                    // Set threshold
+                    pipeline->setThreshold(defect_threshold);
+                    std::cout << "[Dashboard] Threshold set to: " << defect_threshold << std::endl;
+                    
+                    is_running = true;
+                    is_initialized = true;
+                    std::cout << "[Dashboard] System initialized successfully" << std::endl;
+                } else {
+                    std::cerr << "[Dashboard] Unknown input type: " << input_str << std::endl;
+                    return;
+                }
             } catch (const std::exception& e) {
                 std::cerr << "Error applying new configuration: " << e.what() << std::endl;
             }
@@ -356,8 +685,8 @@ void Dashboard::DrawMainView(float start_x, float width, float height) {
     // ImGui::Begin("ViewPanel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
     // ImGui::PopStyleColor();
 
-    // [Modified condition] Check if all three textures are ready
-    if (tex_frame != 0 && tex_overlay != 0 && tex_heatmap != 0) {
+    // [Modified condition] Check if all three textures are ready and system is initialized
+    if (tex_frame != 0 && tex_overlay != 0 && tex_heatmap != 0 && is_initialized) {
         // --- Adaptive three-column layout calculation ---
         float pad = 15.0f; // Spacing between images
         // Total width minus left, middle1, middle2, right four gaps

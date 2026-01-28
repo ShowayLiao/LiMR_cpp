@@ -15,17 +15,6 @@ set(TRT_DIR "C:/tensorRT/TensorRT-10.12.0.36.Windows.win10.cuda-11.8/TensorRT-10
 set(GLFW_DIR "${CMAKE_SOURCE_DIR}/3rdparty/glfw-3.4.bin.WIN64")
 set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/3rdparty/imgui-1.92.5")
 
-set(TORCH_PATH_DEBUG "C:/libtorch/libtorch-win-shared-with-deps-1.13.0+cu116")
-set(TORCH_PATH_RELEASE "C:/libtorch/libtorch-win-shared-with-deps-1.13.0+cu116")
-
-if(CMAKE_BUILD_TYPE MATCHES "Debug")
-    message(STATUS "Configuring for DEBUG build...")
-    set(Torch_DIR "${TORCH_PATH_DEBUG}/libtorch/share/cmake/Torch")
-else()
-    message(STATUS "Configuring for RELEASE (or other) build...")
-    set(Torch_DIR "${TORCH_PATH_RELEASE}/libtorch/share/cmake/Torch")
-endif()
-
 find_package(CUDA REQUIRED)
 include_directories(${CUDA_INCLUDE_DIRS})
 enable_language(CUDA)
@@ -38,19 +27,6 @@ include_directories(${TRT_DIR}/samples/common)
 
 find_package(OpenCV)
 include_directories(${OpenCV_INCLUDE_DIRS})
-
-find_package(Torch REQUIRED)
-include_directories(${Torch_INCLUDE_DIRS})
-
-if(CMAKE_BUILD_TYPE MATCHES "Debug")
-    include_directories(${TORCH_PATH_DEBUG}/libtorch/include/torch/csrc/api/include)
-    include_directories(${TORCH_PATH_DEBUG}/libtorch/include)
-    link_directories(${TORCH_PATH_DEBUG}/libtorch/lib)
-else()
-    include_directories(${TORCH_PATH_RELEASE}/libtorch/include/torch/csrc/api/include)
-    include_directories(${TORCH_PATH_RELEASE}/libtorch/include)
-    link_directories(${TORCH_PATH_RELEASE}/libtorch/lib)
-endif()
 
 include_directories(${GLFW_DIR}/include)
 link_directories(${GLFW_DIR}/lib-vc2019)
@@ -69,6 +45,13 @@ file(GLOB_RECURSE SRCS_CU ${PROJECT_SOURCE_DIR}/src/*.cu)
 
 list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/pipeline.cpp")
 list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/video_thread.cpp")
+list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/inference.cpp")
+list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/inference_runner.cpp")
+list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/model_loader.cpp")
+list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/postprocess.cpp")
+list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/preprocess.cpp")
+list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/utils.cpp")
+list(REMOVE_ITEM SRCS_CU "${PROJECT_SOURCE_DIR}/src/utils.cu")
 
 list(APPEND SRCS ${SRCS_CU})
 
@@ -81,6 +64,8 @@ add_executable(test_pipeline
     ${PROJECT_SOURCE_DIR}/src/pipeline/preprocessor.cpp
     ${PROJECT_SOURCE_DIR}/src/pipeline/postprocessor.cpp
     ${PROJECT_SOURCE_DIR}/src/pipeline/InputThread.cpp
+    ${PROJECT_SOURCE_DIR}/src/pipeline/InferenceThread.cpp
+    ${PROJECT_SOURCE_DIR}/src/pipeline/Pipeline.cpp
     ${PROJECT_SOURCE_DIR}/src/kernels/postprocess_mask.cu
     ${PROJECT_SOURCE_DIR}/src/common/kernels.cu
 )
@@ -88,12 +73,15 @@ add_executable(test_pipeline
 add_executable(test_input_thread
     ${PROJECT_SOURCE_DIR}/test/test_input_thread.cpp
     ${PROJECT_SOURCE_DIR}/src/pipeline/InputThread.cpp
+    ${PROJECT_SOURCE_DIR}/src/pipeline/InferenceThread.cpp
+    ${PROJECT_SOURCE_DIR}/src/pipeline/Pipeline.cpp
 )
 
 add_executable(test_inference_thread
     ${PROJECT_SOURCE_DIR}/test/test_inference_thread.cpp
     ${PROJECT_SOURCE_DIR}/src/pipeline/InputThread.cpp
     ${PROJECT_SOURCE_DIR}/src/pipeline/InferenceThread.cpp
+    ${PROJECT_SOURCE_DIR}/src/pipeline/Pipeline.cpp
     ${PROJECT_SOURCE_DIR}/src/engine/trt_engine.cpp
     ${PROJECT_SOURCE_DIR}/src/kernels/preprocess.cu
     ${PROJECT_SOURCE_DIR}/src/pipeline/preprocessor.cpp
@@ -106,7 +94,6 @@ target_link_libraries(limr nvinfer_10)
 target_link_libraries(limr cudart)
 target_link_libraries(limr nvonnxparser_10)
 target_link_libraries(limr ${OpenCV_LIBS})
-target_link_libraries(limr torch)
 target_link_libraries(limr glfw3 opengl32)
 target_link_libraries(limr nppc)
 target_link_libraries(limr nppial)
@@ -166,12 +153,7 @@ endforeach()
 
 list(APPEND ALL_DLLS ${OPENCV_FINAL_DLLS})
 
-if(CMAKE_BUILD_TYPE MATCHES "Debug")
-    file(GLOB TORCH_DLLS "${TORCH_PATH_DEBUG}/libtorch/lib/*.dll")
-else()
-    file(GLOB TORCH_DLLS "${TORCH_PATH_RELEASE}/libtorch/lib/*.dll")
-endif()
-list(APPEND ALL_DLLS ${TORCH_DLLS})
+
 
 get_filename_component(CUDA_BIN_DIR ${CUDA_CUDART_LIBRARY} DIRECTORY)
 set(CUDA_DLL_DIR "${CUDA_TOOLKIT_ROOT_DIR}/bin")

@@ -20,6 +20,8 @@ InputThread::~InputThread() {
 
 void InputThread::start() {
     if (!running_) {
+        // Reset the queue before starting
+        input_queue_.reset();
         running_ = true;
         thread_ = std::thread(&InputThread::run, this);
     }
@@ -34,7 +36,8 @@ void InputThread::stop() {
         if (cap_.isOpened()) {
             cap_.release();
         }
-        input_queue_.shutdown();
+        // Don't shutdown the queue here, just reset it
+        input_queue_.reset();
     }
 }
 
@@ -50,7 +53,30 @@ void InputThread::run() {
     std::cout << "[InputThread] Starting with source: " << source_ << std::endl;
 
     // Open video source
-    if (!cap_.open(source_)) {
+    bool opened = false;
+    
+    // Try to open as camera index first (if source is a number)
+    try {
+        int camera_index = std::stoi(source_);
+        opened = cap_.open(camera_index);
+        if (opened) {
+            std::cout << "[InputThread] Opened camera with index: " << camera_index << std::endl;
+        }
+    } catch (const std::invalid_argument& e) {
+        // Not a number, try to open as video file
+        opened = cap_.open(source_);
+        if (opened) {
+            std::cout << "[InputThread] Opened video file: " << source_ << std::endl;
+        }
+    } catch (const std::out_of_range& e) {
+        // Number out of range, try to open as video file
+        opened = cap_.open(source_);
+        if (opened) {
+            std::cout << "[InputThread] Opened video file: " << source_ << std::endl;
+        }
+    }
+    
+    if (!opened) {
         std::cerr << "[InputThread] Failed to open video source: " << source_ << std::endl;
         running_ = false;
         return;
@@ -62,6 +88,12 @@ void InputThread::run() {
     size_t img_pixels = width_ * height_;
 
     while (running_) {
+        // Limit queue size, if 5 frames are堆积 and not processed, wait
+        if (input_queue_.size() > 5) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            continue;
+        }
+        
         // Read frame
         if (!cap_.read(frame)) {
             std::cerr << "[InputThread] Failed to read frame, restarting..." << std::endl;
@@ -115,7 +147,7 @@ void InputThread::run() {
         input_queue_.push(task);
 
         // Control frame rate
-        std::this_thread::sleep_for(std::chrono::milliseconds(33)); // ~30 FPS
+        // std::this_thread::sleep_for(std::chrono::milliseconds(33)); // ~30 FPS
     }
 
     std::cout << "[InputThread] Stopped" << std::endl;

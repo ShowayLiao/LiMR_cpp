@@ -6,7 +6,6 @@
 #include "app_config.h"
 #include "pipeline/Pipeline.h"
 #include "engine/TrtEngine.h"
-#include "utils.h" 
 #include <cuda_gl_interop.h>
 
 class Dashboard {
@@ -67,4 +66,7 @@ private:
     const char* precision_items[2] = { "F32", "F16 " };
 
     float defect_threshold = 0.5f;
+    
+    // Recent processing time (to avoid display flickering)
+    double recent_processing_time = 0.0;
 };

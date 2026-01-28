@@ -1,6 +1,16 @@
 # include "app_config.h"
 # include <iostream>
 # include <fstream>
+# include <cctype>
+
+// Helper function: Check if string is a number (camera index)
+static bool is_number(const std::string& str) {
+    if (str.empty()) return false;
+    for (char c : str) {
+        if (!std::isdigit(c)) return false;
+    }
+    return true;
+}
 
 AppConfig::AppConfig(const std::string& videoSource, 
            const std::string& enginePathA, 
@@ -28,7 +38,8 @@ AppConfig::AppConfig(const std::string& videoSource,
           outputHeight(outputHeight),
           heatmapAlpha(heatmapAlpha),
           colormapType(colormapType) {
-            if (!videoSource.empty() && !std::ifstream(videoSource).good()) {
+            // Only check video source file existence if it's not a camera index (number)
+            if (!videoSource.empty() && !is_number(videoSource) && !std::ifstream(videoSource).good()) {
                 throw std::runtime_error("Video source file does not exist: " + videoSource);
             }
             if (!enginePathA.empty() && !std::ifstream(enginePathA).good()) {

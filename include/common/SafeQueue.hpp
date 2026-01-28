@@ -56,6 +56,15 @@ public:
         cond_.notify_all();
     }
 
+    void reset() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        shutdown_ = false;
+        // Clear the queue
+        while (!queue_.empty()) {
+            queue_.pop();
+        }
+    }
+
 private:
     mutable std::mutex mutex_;
     std::condition_variable cond_;
