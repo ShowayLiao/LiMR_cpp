@@ -4,9 +4,9 @@
 #include <npp.h>
 #include <stdexcept>
 
-extern void launchLayoutConvertNorm(uint8_t* src, float* dst, int w, int h, cudaStream_t stream);
+extern void launchLayoutConvertNorm(uint8_t* src, float* dst, int w, int h, cudaStream_t stream, bool skip_normalization);
 
-Preprocessor::Preprocessor(int w, int h) : dst_w_(w), dst_h_(h) {
+Preprocessor::Preprocessor(int w, int h, bool skip_normalization) : dst_w_(w), dst_h_(h), skip_normalization_(skip_normalization) {
     oDstSize_ = {dst_w_, dst_h_};
     oDstRectROI_ = {0, 0, dst_w_, dst_h_};
 
@@ -47,6 +47,7 @@ void Preprocessor::process(const cv::Mat& src_img, void* d_dst_buffer, cudaStrea
     launchLayoutConvertNorm(
         (uint8_t*)d_resize_temp_.get(),
         (float*)d_dst_buffer,
-        dst_w_, dst_h_, stream
+        dst_w_, dst_h_, stream,
+        skip_normalization_
     );
 }

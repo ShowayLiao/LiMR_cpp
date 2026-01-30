@@ -49,9 +49,12 @@ private:
     // [New] Pure heatmap texture
     unsigned int tex_heatmap = 0; 
     unsigned int tex_overlay = 0; 
+    unsigned int tex_combined = 0; 
     
     // CUDA-OpenGL Interop resources
     cudaGraphicsResource_t cuda_res_heatmap = nullptr;
+    cudaGraphicsResource_t cuda_res_overlay = nullptr;
+    cudaGraphicsResource_t cuda_res_combined = nullptr;
     
     // Current task data
     pipeline::FrameTaskPtr current_task;
@@ -67,6 +70,15 @@ private:
 
     float defect_threshold = 0.5f;
     
+    // Resolution settings
+    int width = 256;  // Default width
+    int height = 256; // Default height
+    const char* resolution_items[4] = { "256x256", "512x512", "640x480", "1024x768" };
+    int current_resolution_idx = 0; // Default to 256x256
+    
     // Recent processing time (to avoid display flickering)
     double recent_processing_time = 0.0;
+    
+    // Anomalib mode flag
+    bool use_anomalib_mode_ = false;
 };

@@ -2,6 +2,7 @@
 #include <iostream>
 #include <chrono>
 #include "pipeline/Pipeline.h"
+#include <cuda_runtime.h>
 
 namespace pipeline {
 
@@ -94,11 +95,14 @@ void InputThread::run() {
             continue;
         }
         
-        // Read frame
+        // Read frame with timeout
         if (!cap_.read(frame)) {
             std::cerr << "[InputThread] Failed to read frame, restarting..." << std::endl;
             // Try to reopen video source
             cap_.release();
+            if (!running_) {
+                break;
+            }
             if (!cap_.open(source_)) {
                 std::cerr << "[InputThread] Failed to reopen video source" << std::endl;
                 break;
@@ -107,41 +111,37 @@ void InputThread::run() {
         }
 
         // Get task object (prefer from pool, create new if none available)
-        FrameTaskPtr task;
-        if (pipeline_) {
-            task = pipeline_->get_empty_task();
-            task->frame_id = frame_id_++;
-            task->original_image = frame;
-            
-            // 检查是否需要分配显存（首次使用时）
-            if (!task->d_input) {
-                task->d_input = make_device_buffer(3 * img_pixels * sizeof(float));
-            }
-            if (!task->d_pred_score) {
-                task->d_pred_score = make_device_buffer(sizeof(float));
-            }
-            if (!task->d_pred_label) {
-                task->d_pred_label = make_device_buffer(sizeof(bool));
-            }
-            if (!task->d_anomaly_map) {
-                task->d_anomaly_map = make_device_buffer(img_pixels * sizeof(float));
-            }
-            if (!task->d_dynamic_mask) {
-                task->d_dynamic_mask = make_device_buffer(img_pixels * sizeof(uint8_t));
-            }
-        } else {
-            // 如果没有pipeline，使用原来的方式创建任务
-            task = std::make_shared<FrameTask>();
-            task->frame_id = frame_id_++;
-            task->original_image = frame;
+            FrameTaskPtr task;
+            if (pipeline_) {
+                task = pipeline_->get_empty_task();
+                task->frame_id = frame_id_++;
+                task->original_image = frame;
+                task->target_width = width_;
+                task->target_height = height_;
+                
+                // Upload original image to GPU memory
+                size_t original_img_bytes = frame.cols * frame.rows * 3 * sizeof(uint8_t);
+                if (!task->d_original_image) {
+                    task->d_original_image = make_device_buffer(original_img_bytes);
+                }
+                cudaMemcpyAsync(task->d_original_image.get(), frame.data, original_img_bytes, cudaMemcpyHostToDevice);
+                
+                // 注意：不再需要分配中间推理缓冲区，这些现在由InferenceThread管理
+            } else {
+                // 如果没有pipeline，使用原来的方式创建任务
+                task = std::make_shared<FrameTask>();
+                task->frame_id = frame_id_++;
+                task->original_image = frame;
+                task->target_width = width_;
+                task->target_height = height_;
 
-            // Allocate GPU memory
-            task->d_input = make_device_buffer(3 * img_pixels * sizeof(float));
-            task->d_pred_score = make_device_buffer(sizeof(float));
-            task->d_pred_label = make_device_buffer(sizeof(bool));
-            task->d_anomaly_map = make_device_buffer(img_pixels * sizeof(float));
-            task->d_dynamic_mask = make_device_buffer(img_pixels * sizeof(uint8_t));
-        }
+                // Upload original image to GPU memory
+                size_t original_img_bytes = frame.cols * frame.rows * 3 * sizeof(uint8_t);
+                task->d_original_image = make_device_buffer(original_img_bytes);
+                cudaMemcpyAsync(task->d_original_image.get(), frame.data, original_img_bytes, cudaMemcpyHostToDevice);
+
+                // 注意：不再需要分配中间推理缓冲区，这些现在由InferenceThread管理
+            }
 
         // Push to input queue
         input_queue_.push(task);

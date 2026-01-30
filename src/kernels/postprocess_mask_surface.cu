@@ -1,5 +1,6 @@
 #include <cuda_runtime.h>
 #include <vector_types.h>
+#include <stdint.h>
 
 __global__ void maskToSurfaceKernel(uint8_t* d_mask, cudaSurfaceObject_t surface, int w, int h, uchar4 color) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;

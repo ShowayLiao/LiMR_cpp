@@ -54,3 +54,5 @@ cuda/
 
 # TensorRT files
 TensorRT-*/
+
+.trae/

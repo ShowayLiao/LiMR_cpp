@@ -1,4 +1,5 @@
 #include <GLFW/glfw3.h> // If OpenGL functions are needed
+#include <GL/gl.h> // Include OpenGL headers for GL_BGR
 #include "dashboard.h"
 #include <iostream>
 #include <fstream>
@@ -8,6 +9,10 @@
 #include "pipeline/Postprocessor.h"
 #include "common/CudaMemory.hpp"
 #include "pipeline/Pipeline.h"
+
+#ifndef GL_BGR
+#define GL_BGR 0x80E0
+#endif
 
 // Helper function: Update texture (you can put this in utils.h, but for convenience it's written here directly)
 static void update_texture_internal(const cv::Mat& mat, unsigned int& texture_id) {
@@ -95,14 +100,14 @@ void Dashboard::InitResources() {
         glBindTexture(GL_TEXTURE_2D, tex_frame);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 256, 256, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
         
         glGenTextures(1, &tex_heatmap);
         glBindTexture(GL_TEXTURE_2D, tex_heatmap);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         // Key point: format is changed to GL_RGBA here
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 256, 256, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
         glBindTexture(GL_TEXTURE_2D, 0);
         
         // Register as CUDA resource
@@ -112,7 +117,23 @@ void Dashboard::InitResources() {
         glBindTexture(GL_TEXTURE_2D, tex_overlay);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 256, 256, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+        // Change format to GL_RGBA for overlay with alpha channel
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        
+        // Register overlay texture as CUDA resource
+        cudaGraphicsGLRegisterImage(&cuda_res_overlay, tex_overlay, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsWriteDiscard);
+        
+        glGenTextures(1, &tex_combined);
+        glBindTexture(GL_TEXTURE_2D, tex_combined);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        // Format is GL_RGBA for combined image with overlay
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        
+        // Register combined texture as CUDA resource
+        cudaGraphicsGLRegisterImage(&cuda_res_combined, tex_combined, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsWriteDiscard);
         
         // Print texture IDs to ensure they are not 0
         // std::cout << "[Dashboard] Texture IDs generated: " << std::endl;
@@ -120,19 +141,29 @@ void Dashboard::InitResources() {
         // std::cout << "  - tex_heatmap: " << tex_heatmap << std::endl;
         // std::cout << "  - tex_overlay: " << tex_overlay << std::endl;
         
-        // Initialize with 256x256 black background texture
-        // Create black background data
-        std::vector<unsigned char> black_background(256 * 256 * 3, 0);
+        // Initialize with black background texture
+        // Create RGB black buffer for tex_frame
+        std::vector<unsigned char> black_background(width * height * 3, 0);
+        
+        // Create RGBA black buffer for other textures
+        std::vector<unsigned char> black_rgba(width * height * 4, 0);
         
         // Update black background to textures
+        // tex_frame uses RGB format
         glBindTexture(GL_TEXTURE_2D, tex_frame);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 256, 256, 0, GL_RGB, GL_UNSIGNED_BYTE, black_background.data());
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, black_background.data());
         
+        // tex_heatmap uses RGBA format - use glTexSubImage2D to preserve format
         glBindTexture(GL_TEXTURE_2D, tex_heatmap);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 256, 256, 0, GL_RGB, GL_UNSIGNED_BYTE, black_background.data());
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, black_rgba.data());
         
+        // tex_overlay uses RGBA format - use glTexSubImage2D to preserve format
         glBindTexture(GL_TEXTURE_2D, tex_overlay);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 256, 256, 0, GL_RGB, GL_UNSIGNED_BYTE, black_background.data());
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, black_rgba.data());
+        
+        // tex_combined uses RGBA format - use glTexSubImage2D to preserve format
+        glBindTexture(GL_TEXTURE_2D, tex_combined);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, black_rgba.data());
         
         std::cout << "[Dashboard] Initialized textures with black background" << std::endl;
         
@@ -146,10 +177,19 @@ Dashboard::~Dashboard() {
         cudaGraphicsUnregisterResource(cuda_res_heatmap);
         cuda_res_heatmap = nullptr;
     }
+    if (cuda_res_overlay) {
+        cudaGraphicsUnregisterResource(cuda_res_overlay);
+        cuda_res_overlay = nullptr;
+    }
+    if (cuda_res_combined) {
+        cudaGraphicsUnregisterResource(cuda_res_combined);
+        cuda_res_combined = nullptr;
+    }
     if (tex_frame) glDeleteTextures(1, &tex_frame);
     // [新增]
     if (tex_heatmap) glDeleteTextures(1, &tex_heatmap);
     if (tex_overlay) glDeleteTextures(1, &tex_overlay);
+    if (tex_combined) glDeleteTextures(1, &tex_combined);
 }
 
 void Dashboard::UpdateData(const pipeline::FrameTaskPtr& task) {
@@ -167,38 +207,81 @@ void Dashboard::UpdateData(const pipeline::FrameTaskPtr& task) {
     if (!task->original_image.empty()) {
         // Update original image texture
         glBindTexture(GL_TEXTURE_2D, tex_frame);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, task->original_image.cols, task->original_image.rows, 0, GL_RGB, GL_UNSIGNED_BYTE, task->original_image.data);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, task->original_image.cols, task->original_image.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, task->original_image.data);
     }
     
     // Update heatmap texture (using CUDA-OpenGL Interop to update directly from device memory)
-    if (task->d_heatmap_gpu) {
-        cudaGraphicsMapResources(1, &cuda_res_heatmap, 0);
+    if (task->d_final_heatmap) {
+        // 1. 检查映射是否成功
+        cudaError_t err = cudaGraphicsMapResources(1, &cuda_res_heatmap, 0);
+        if (err != cudaSuccess) {
+            std::cerr << "[Error] Heatmap Map failed: " << cudaGetErrorString(err) << std::endl;
+        } else {
+            cudaArray_t tex_array;
+            cudaGraphicsSubResourceGetMappedArray(&tex_array, cuda_res_heatmap, 0, 0);
+            
+            // 2. 检查拷贝是否报错
+            err = cudaMemcpy2DToArray(
+                tex_array, 0, 0,
+                task->d_final_heatmap.get(),
+                task->target_width * 4 * sizeof(uint8_t),
+                task->target_width * 4 * sizeof(uint8_t),
+                task->target_height,
+                cudaMemcpyDeviceToDevice
+            );
+            
+            if (err != cudaSuccess) {
+                std::cout << "[Error] Heatmap Copy failed: " << cudaGetErrorString(err) << std::endl;
+            }
+            
+            cudaGraphicsUnmapResources(1, &cuda_res_heatmap, 0);
+        }
+    }
+    
+    // Update overlay texture from GPU memory
+    if (task->d_final_overlay) {
+        cudaGraphicsMapResources(1, &cuda_res_overlay, 0);
         cudaArray_t tex_array;
-        cudaGraphicsSubResourceGetMappedArray(&tex_array, cuda_res_heatmap, 0, 0);
+        cudaGraphicsSubResourceGetMappedArray(&tex_array, cuda_res_overlay, 0, 0);
         
-        // [Critical fix] Both Pitch and Width are 256 * 4
+        // Use task target size for memory copy parameters
         cudaMemcpy2DToArray(
             tex_array, 0, 0,
-            task->d_heatmap_gpu.get(),
-            256 * 4 * sizeof(uint8_t), // Pitch (bytes per row in source data)
-            256 * 4 * sizeof(uint8_t), // Width (bytes to copy)
-            256,                       // Height
+            task->d_final_overlay.get(),
+            task->target_width * 4 * sizeof(uint8_t),
+            task->target_width * 4 * sizeof(uint8_t),
+            task->target_height,
             cudaMemcpyDeviceToDevice
         );
         
-        cudaGraphicsUnmapResources(1, &cuda_res_heatmap, 0);
+        cudaGraphicsUnmapResources(1, &cuda_res_overlay, 0);
+    } else if (!task->original_image.empty()) {
+        // If no overlay data, fallback to original image
+        glBindTexture(GL_TEXTURE_2D, tex_overlay);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, task->original_image.cols, task->original_image.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, task->original_image.data);
     }
     
-    // Update overlay texture (using detection results)
-    // Prefer to use heatmap_vis as detection result
-    if (!task->heatmap_vis.empty()) {
-        // Update overlay texture
-        glBindTexture(GL_TEXTURE_2D, tex_overlay);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, task->heatmap_vis.cols, task->heatmap_vis.rows, 0, GL_RGB, GL_UNSIGNED_BYTE, task->heatmap_vis.data);
+    // Update combined texture from GPU memory
+    if (task->d_final_overlay) {
+        cudaGraphicsMapResources(1, &cuda_res_combined, 0);
+        cudaArray_t tex_array;
+        cudaGraphicsSubResourceGetMappedArray(&tex_array, cuda_res_combined, 0, 0);
+        
+        // Use task target size for memory copy parameters
+        cudaMemcpy2DToArray(
+            tex_array, 0, 0,
+            task->d_final_overlay.get(),
+            task->target_width * 4 * sizeof(uint8_t),
+            task->target_width * 4 * sizeof(uint8_t),
+            task->target_height,
+            cudaMemcpyDeviceToDevice
+        );
+        
+        cudaGraphicsUnmapResources(1, &cuda_res_combined, 0);
     } else if (!task->original_image.empty()) {
-        // If no detection result, fallback to original image
-        glBindTexture(GL_TEXTURE_2D, tex_overlay);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, task->original_image.cols, task->original_image.rows, 0, GL_RGB, GL_UNSIGNED_BYTE, task->original_image.data);
+        // If no combined data, fallback to original image
+        glBindTexture(GL_TEXTURE_2D, tex_combined);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, task->original_image.cols, task->original_image.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, task->original_image.data);
     }
     
     // For CUDA Interop mode, texture content is updated by PostProcessor, no need to call glTexImage2D here
@@ -277,9 +360,9 @@ void Dashboard::Render(int display_w, int display_h) {
     }
 }
 
-void Dashboard::DrawSidePanel(float width, float height) {
+void Dashboard::DrawSidePanel(float panel_width, float panel_height) {
     ImGui::SetNextWindowPos(ImVec2(0, 0));
-    ImGui::SetNextWindowSize(ImVec2(width, height));
+    ImGui::SetNextWindowSize(ImVec2(panel_width, panel_height));
     
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
     ImGui::Begin("ControlPanel", nullptr, flags);
@@ -311,6 +394,24 @@ void Dashboard::DrawSidePanel(float width, float height) {
     
     ImGui::Combo("Precision", &current_precision_idx, precision_items, 2);
 
+    // Resolution selection
+    ImGui::Combo("Resolution", &current_resolution_idx, resolution_items, 4);
+    
+    // Update width and height based on selected resolution
+    if (current_resolution_idx == 0) { // 256x256
+        this->width = 256;
+        this->height = 256;
+    } else if (current_resolution_idx == 1) { // 512x512
+        this->width = 512;
+        this->height = 512;
+    } else if (current_resolution_idx == 2) { // 640x480
+        this->width = 640;
+        this->height = 480;
+    } else if (current_resolution_idx == 3) { // 1024x768
+        this->width = 1024;
+        this->height = 768;
+    }
+
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Text("Inference Parameters");
@@ -326,6 +427,14 @@ void Dashboard::DrawSidePanel(float width, float height) {
     // Add an explanation
     if (ImGui::IsItemHovered()) 
         ImGui::SetTooltip("Adjust sensitivity for defect contours");
+    
+    // Anomalib mode checkbox
+    if (ImGui::Checkbox("Anomalib Mode", &use_anomalib_mode_)) {
+        std::cout << "[Dashboard] Anomalib mode: " << (use_anomalib_mode_ ? "enabled" : "disabled") << std::endl;
+    }
+    // Add an explanation
+    if (ImGui::IsItemHovered()) 
+        ImGui::SetTooltip("Skip normalization in preprocessing");
 
     ImGui::Spacing();
     ImGui::Separator();
@@ -335,6 +444,34 @@ void Dashboard::DrawSidePanel(float width, float height) {
     if (!is_initialized) {
         if (ImGui::Button("INITIALIZE SYSTEM", ImVec2(-1, btnH))) {
             try {
+                // [Safety Check] If textures exist but size doesn't match selected resolution, clear them
+                static int tex_width_tracker = 0;
+                static int tex_height_tracker = 0;
+
+                // Check if re-allocation is needed
+                if (resources_initialized && (tex_width_tracker != this->width || tex_height_tracker != this->height)) {
+                    std::cout << "[Dashboard] Resolution mismatch detected during init. Cleaning up old resources..." << std::endl;
+
+                    // 1. MUST Unregister CUDA resources first!
+                    if (cuda_res_heatmap) { cudaGraphicsUnregisterResource(cuda_res_heatmap); cuda_res_heatmap = nullptr; }
+                    if (cuda_res_overlay) { cudaGraphicsUnregisterResource(cuda_res_overlay); cuda_res_overlay = nullptr; }
+                    if (cuda_res_combined) { cudaGraphicsUnregisterResource(cuda_res_combined); cuda_res_combined = nullptr; }
+
+                    // [FIX] Ensure CUDA is completely done with resources before GL deletes them
+                    cudaDeviceSynchronize();
+
+                    // 2. Then delete GL textures
+                    if (tex_frame) { glDeleteTextures(1, &tex_frame); tex_frame = 0; }
+                    if (tex_heatmap) { glDeleteTextures(1, &tex_heatmap); tex_heatmap = 0; }
+                    if (tex_overlay) { glDeleteTextures(1, &tex_overlay); tex_overlay = 0; }
+                    if (tex_combined) { glDeleteTextures(1, &tex_combined); tex_combined = 0; }
+                    
+                    // 3. Force synchronization to be safe
+                    glFinish();
+                    
+                    resources_initialized = false;
+                }
+
                 // Call your backend initialization logic here
                 std::string type_str = precision_items[current_precision_idx];
                 trt::Precision precision = (type_str == "F16 ") ? trt::Precision::FP16 : trt::Precision::FP32;
@@ -379,11 +516,14 @@ void Dashboard::DrawSidePanel(float width, float height) {
                         // Initialize resources if not already initialized
                         if (!resources_initialized) {
                             InitResources();
+                            // Track the allocated size
+                            tex_width_tracker = this->width;
+                            tex_height_tracker = this->height;
                         }
                         
                         // For image input, use the same pipeline approach as video
                         // Create pipeline
-                        pipeline = std::make_unique<pipeline::Pipeline>(video_path, 256, 256, engine.get());
+                        pipeline = std::make_unique<pipeline::Pipeline>(video_path, static_cast<int>(this->width), static_cast<int>(this->height), engine.get(), use_anomalib_mode_);
                         
                         // Start pipeline
                         pipeline->start();
@@ -436,11 +576,14 @@ void Dashboard::DrawSidePanel(float width, float height) {
                     
                     // Create pipeline
                     std::cout << "[Dashboard] Creating pipeline with video source: " << video_path << std::endl;
-                    pipeline = std::make_unique<pipeline::Pipeline>(video_path, 256, 256, engine.get());
+                    pipeline = std::make_unique<pipeline::Pipeline>(video_path, static_cast<int>(this->width), static_cast<int>(this->height), engine.get(), use_anomalib_mode_);
                     
                     // Initialize resources if not already initialized
                     if (!resources_initialized) {
                         InitResources();
+                        // Track the allocated size
+                        tex_width_tracker = this->width;
+                        tex_height_tracker = this->height;
                     }
                     
                     // Start pipeline
@@ -465,7 +608,7 @@ void Dashboard::DrawSidePanel(float width, float height) {
         }
     } else {
         if (is_running) {
-            if (ImGui::Button("PAUSE", ImVec2(width * 0.45f, btnH))) {
+            if (ImGui::Button("PAUSE", ImVec2(150, btnH))) {
                 is_running = false;
                 if (pipeline) {
                     pipeline->stop();
@@ -473,7 +616,7 @@ void Dashboard::DrawSidePanel(float width, float height) {
                 }
             }
         } else {
-            if (ImGui::Button("RESUME", ImVec2(width * 0.45f, btnH))) {
+            if (ImGui::Button("RESUME", ImVec2(150, btnH))) {
                 is_running = true;
                 if (pipeline) {
                     pipeline->start();
@@ -482,7 +625,7 @@ void Dashboard::DrawSidePanel(float width, float height) {
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("RESET", ImVec2(width * 0.45f, btnH))) {
+        if (ImGui::Button("RESET", ImVec2(150, btnH))) {
             // Stop pipeline first before destroying it
             if (pipeline) {
                 pipeline->stop();
@@ -496,24 +639,38 @@ void Dashboard::DrawSidePanel(float width, float height) {
             engine.reset();
             appConfig.reset();
             
-            // Reset textures
-            tex_frame = 0;
-            tex_heatmap = 0;
-            tex_overlay = 0;
-            
-            // Reset resources initialized flag to force reinitialization
-            resources_initialized = false;
-            
             // Reset CUDA resources
             if (cuda_res_heatmap) {
                 cudaGraphicsUnregisterResource(cuda_res_heatmap);
                 cuda_res_heatmap = nullptr;
             }
+            if (cuda_res_overlay) {
+                cudaGraphicsUnregisterResource(cuda_res_overlay);
+                cuda_res_overlay = nullptr;
+            }
+            if (cuda_res_combined) {
+                cudaGraphicsUnregisterResource(cuda_res_combined);
+                cuda_res_combined = nullptr;
+            }
+
+            // Release OpenGL textures
+            if (tex_frame) glDeleteTextures(1, &tex_frame);
+            if (tex_heatmap) glDeleteTextures(1, &tex_heatmap);
+            if (tex_overlay) glDeleteTextures(1, &tex_overlay);
+            if (tex_combined) glDeleteTextures(1, &tex_combined);
+
+            // Reset texture IDs
+            tex_frame = 0;
+            tex_heatmap = 0;
+            tex_overlay = 0;
+            tex_combined = 0;
+            
+            // Reset resources initialized flag to force reinitialization
+            resources_initialized = false;
             
             // Reset current task
             current_task.reset();
         }
-        
         // Apply & Reload button
         ImGui::Spacing();
         if (ImGui::Button("Apply & Reload", ImVec2(-1, btnH))) {
@@ -539,6 +696,26 @@ void Dashboard::DrawSidePanel(float width, float height) {
                     cudaGraphicsUnregisterResource(cuda_res_heatmap);
                     cuda_res_heatmap = nullptr;
                 }
+                if (cuda_res_overlay) {
+                    cudaGraphicsUnregisterResource(cuda_res_overlay);
+                    cuda_res_overlay = nullptr;
+                }
+                if (cuda_res_combined) {
+                    cudaGraphicsUnregisterResource(cuda_res_combined);
+                    cuda_res_combined = nullptr;
+                }
+                
+                // Release OpenGL textures
+                if (tex_frame) glDeleteTextures(1, &tex_frame);
+                if (tex_heatmap) glDeleteTextures(1, &tex_heatmap);
+                if (tex_overlay) glDeleteTextures(1, &tex_overlay);
+                if (tex_combined) glDeleteTextures(1, &tex_combined);
+
+                // Reset texture IDs
+                tex_frame = 0;
+                tex_heatmap = 0;
+                tex_overlay = 0;
+                tex_combined = 0;
                 
                 // Reset current task
                 current_task.reset();
@@ -591,7 +768,7 @@ void Dashboard::DrawSidePanel(float width, float height) {
                         
                         // For image input, use the same pipeline approach as video
                         // Create pipeline
-                        pipeline = std::make_unique<pipeline::Pipeline>(video_path, 256, 256, engine.get());
+                        pipeline = std::make_unique<pipeline::Pipeline>(video_path, static_cast<int>(this->width), static_cast<int>(this->height), engine.get(), use_anomalib_mode_);
                         
                         // Start pipeline
                         pipeline->start();
@@ -648,7 +825,7 @@ void Dashboard::DrawSidePanel(float width, float height) {
                     }
                     
                     // Recreate pipeline
-                    pipeline = std::make_unique<pipeline::Pipeline>(video_path, 256, 256, engine.get());
+                    pipeline = std::make_unique<pipeline::Pipeline>(video_path, static_cast<int>(this->width), static_cast<int>(this->height), engine.get(), use_anomalib_mode_);
                     
                     // Start pipeline
                     pipeline->start();
@@ -736,21 +913,15 @@ void Dashboard::DrawMainView(float start_x, float width, float height) {
 
         ImGui::SameLine(0, pad);
 
-        // 3. Final result image (red boxes on original image)
-        // ImGui::BeginGroup();
-        // ImGui::Text("Defect Detection");
-        // ImGui::Image((void*)(intptr_t)tex_overlay, ImVec2(targetW, targetH));
-        // ImGui::EndGroup();
-
-        // ImGui::SameLine(0, pad); 
+        // 3. Final result image (original image with semi-transparent red overlay)
         ImGui::BeginGroup();
         ImGui::Text("Defect Detection");
 
         // [Step 1] Get the starting absolute coordinates of the current image on the screen
         ImVec2 p_min = ImGui::GetCursorScreenPos();
 
-        // [Step 2] Draw the base image
-        ImGui::Image((void*)(intptr_t)tex_overlay, ImVec2(targetW, targetH));
+        // [Step 2] Draw the combined image (original + semi-transparent red overlay)
+        ImGui::Image((void*)(intptr_t)tex_combined, ImVec2(targetW, targetH));
 
         // [Step 3] Get the drawing pen and draw red boxes
         // TODO: Get defect rectangles from the task object
@@ -760,9 +931,9 @@ void Dashboard::DrawMainView(float start_x, float width, float height) {
             
             // 【Core fix: Calculate scaling ratio】
             // Get the base resolution used during inference (backend calculates coordinates based on this resolution)
-            // We read these values from the configuration object to ensure generality
-            float baseW = 256.0f;  // Fixed to 256x256
-            float baseH = 256.0f; // Fixed to 256x256
+            // Use dynamic resolution values
+            float baseW = static_cast<float>(width);  // Use dynamic width
+            float baseH = static_cast<float>(height); // Use dynamic height
 
             // Protection against division by zero
             if (baseW > 0 && baseH > 0) {

@@ -10,7 +10,7 @@ namespace pipeline {
 
 class Pipeline {
 public:
-    Pipeline(const std::string& video_source, int width, int height, trt::TrtEngine* engine);
+    Pipeline(const std::string& video_source, int width, int height, trt::TrtEngine* engine, bool skip_normalization = false);
     ~Pipeline();
 
     void start();

@@ -77,18 +77,6 @@ add_executable(test_input_thread
     ${PROJECT_SOURCE_DIR}/src/pipeline/Pipeline.cpp
 )
 
-add_executable(test_inference_thread
-    ${PROJECT_SOURCE_DIR}/test/test_inference_thread.cpp
-    ${PROJECT_SOURCE_DIR}/src/pipeline/InputThread.cpp
-    ${PROJECT_SOURCE_DIR}/src/pipeline/InferenceThread.cpp
-    ${PROJECT_SOURCE_DIR}/src/pipeline/Pipeline.cpp
-    ${PROJECT_SOURCE_DIR}/src/engine/trt_engine.cpp
-    ${PROJECT_SOURCE_DIR}/src/kernels/preprocess.cu
-    ${PROJECT_SOURCE_DIR}/src/pipeline/preprocessor.cpp
-    ${PROJECT_SOURCE_DIR}/src/pipeline/postprocessor.cpp
-    ${PROJECT_SOURCE_DIR}/src/kernels/postprocess_mask.cu
-    ${PROJECT_SOURCE_DIR}/src/common/kernels.cu
-)
 
 target_link_libraries(limr nvinfer_10)
 target_link_libraries(limr cudart)
@@ -112,14 +100,6 @@ target_link_libraries(test_pipeline nppig)
 target_link_libraries(test_input_thread ${OpenCV_LIBS})
 target_link_libraries(test_input_thread cudart)
 
-target_link_libraries(test_inference_thread nvinfer_10)
-target_link_libraries(test_inference_thread cudart)
-target_link_libraries(test_inference_thread nvonnxparser_10)
-target_link_libraries(test_inference_thread ${OpenCV_LIBS})
-target_link_libraries(test_inference_thread nppc)
-target_link_libraries(test_inference_thread nppial)
-target_link_libraries(test_inference_thread nppist)
-target_link_libraries(test_inference_thread nppig)
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/install" CACHE PATH "..." FORCE)
@@ -131,56 +111,101 @@ install(TARGETS limr
     ARCHIVE DESTINATION lib
 )
 
+# 设置需要的动态库列表
+set(REQUIRED_DLLS
+    # --- OpenCV (仅保留核心模块) ---
+    opencv_core455.dll
+    opencv_imgcodecs455.dll
+    opencv_imgproc455.dll
+    opencv_videoio455.dll
+    opencv_videoio_ffmpeg455_64.dll  # MP4解码必备，不做链接但必须存在
+
+    # --- CUDA / NPP (根据你的代码依赖) ---
+    cudart64_110.dll
+    nppig64_11.dll      # Resize (nppiResize)
+    nppidei64_11.dll    # SwapChannels (nppiSwapChannels)
+    nppc64_11.dll       # NPP Core (基础依赖)
+
+    # --- TensorRT 隐式依赖 (最容易漏的) ---
+    cublas64_11.dll     # 矩阵运算核心
+    cublasLt64_11.dll   # 轻量级矩阵运算 (RTX 30/40系常需)
+    zlibwapi.dll        # TensorRT解压模型依赖 (经常缺失!)
+
+    # --- TensorRT 核心 ---
+    nvinfer_10.dll
+    nvinfer_plugin_10.dll
+    nvinfer_builder_resource_10.dll
+    nvonnxparser_10.dll
+)
+
+# 构建需要拷贝的DLL列表
 set(ALL_DLLS "")
 
-file(GLOB TRT_DLLS "${TRT_DIR}/lib/*.dll")
-list(APPEND ALL_DLLS ${TRT_DLLS})
-
-file(GLOB OPENCV_ALL_DLLS "${OpenCV_DIR}/x64/vc16/bin/*.dll")
-set(OPENCV_FINAL_DLLS "")
-
-foreach(tmp_dll ${OPENCV_ALL_DLLS})
-    if(tmp_dll MATCHES "d\\.dll$")
-        if(CMAKE_BUILD_TYPE MATCHES "Debug")
-            list(APPEND OPENCV_FINAL_DLLS ${tmp_dll})
-        endif()
-    else()
-        if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
-            list(APPEND OPENCV_FINAL_DLLS ${tmp_dll})
+# 查找并添加OpenCV DLLs
+set(OPENCV_BIN_DIR "${OpenCV_DIR}/x64/vc16/bin")
+foreach(dll_name ${REQUIRED_DLLS})
+    if(dll_name MATCHES "^opencv_")
+        set(dll_path "${OPENCV_BIN_DIR}/${dll_name}")
+        if(EXISTS "${dll_path}")
+            list(APPEND ALL_DLLS "${dll_path}")
+        else()
+            message(WARNING "OpenCV DLL not found: ${dll_path}")
         endif()
     endif()
 endforeach()
 
-list(APPEND ALL_DLLS ${OPENCV_FINAL_DLLS})
-
-
-
-get_filename_component(CUDA_BIN_DIR ${CUDA_CUDART_LIBRARY} DIRECTORY)
-set(CUDA_DLL_DIR "${CUDA_TOOLKIT_ROOT_DIR}/bin")
-file(GLOB CUDA_DLLS "${CUDA_DLL_DIR}/cudart64_*.dll" "${CUDA_DLL_DIR}/cublas64_*.dll" "${CUDA_DLL_DIR}/curand64_*.dll")
-list(APPEND ALL_DLLS ${CUDA_DLLS})
-
-install(FILES ${ALL_DLLS} DESTINATION bin)
-
-foreach(DLL_FILE ${ALL_DLLS})
-    add_custom_command(TARGET limr POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${DLL_FILE}"
-        "$<TARGET_FILE_DIR:limr>"
-    )
-    add_custom_command(TARGET test_pipeline POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${DLL_FILE}"
-        "$<TARGET_FILE_DIR:test_pipeline>"
-    )
-    add_custom_command(TARGET test_input_thread POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${DLL_FILE}"
-        "$<TARGET_FILE_DIR:test_input_thread>"
-    )
-    add_custom_command(TARGET test_inference_thread POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${DLL_FILE}"
-        "$<TARGET_FILE_DIR:test_inference_thread>"
-    )
+# 查找并添加CUDA/NPP DLLs
+set(CUDA_BIN_DIR "${CUDA_TOOLKIT_ROOT_DIR}/bin")
+foreach(dll_name ${REQUIRED_DLLS})
+    if(dll_name MATCHES "^(cudart|npp|cublas)")
+        set(dll_path "${CUDA_BIN_DIR}/${dll_name}")
+        if(EXISTS "${dll_path}")
+            list(APPEND ALL_DLLS "${dll_path}")
+        else()
+            # 尝试查找不同版本的CUDA DLL
+            file(GLOB dll_candidates "${CUDA_BIN_DIR}/${dll_name}")
+            if(dll_candidates)
+                list(APPEND ALL_DLLS ${dll_candidates})
+            else()
+                message(WARNING "CUDA/NPP DLL not found: ${dll_path}")
+            endif()
+        endif()
+    endif()
 endforeach()
+
+# 查找并添加TensorRT DLLs
+set(TRT_BIN_DIR "${TRT_DIR}/lib")
+foreach(dll_name ${REQUIRED_DLLS})
+    if(dll_name MATCHES "^(nvinfer|nvonnxparser|zlibwapi)")
+        set(dll_path "${TRT_BIN_DIR}/${dll_name}")
+        if(EXISTS "${dll_path}")
+            list(APPEND ALL_DLLS "${dll_path}")
+        else()
+            message(WARNING "TensorRT DLL not found: ${dll_path}")
+        endif()
+    endif()
+endforeach()
+
+# 安装DLLs
+if(ALL_DLLS)
+    install(FILES ${ALL_DLLS} DESTINATION bin)
+
+    # 构建后拷贝DLLs
+    foreach(DLL_FILE ${ALL_DLLS})
+        add_custom_command(TARGET limr POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${DLL_FILE}"
+            "$<TARGET_FILE_DIR:limr>"
+        )
+        add_custom_command(TARGET test_pipeline POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${DLL_FILE}"
+            "$<TARGET_FILE_DIR:test_pipeline>"
+        )
+        add_custom_command(TARGET test_input_thread POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${DLL_FILE}"
+            "$<TARGET_FILE_DIR:test_input_thread>"
+        )
+    endforeach()
+endif()
