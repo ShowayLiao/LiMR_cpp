@@ -80,22 +80,6 @@ void PostProcessor::process(trt::TrtEngine* engine, FrameTaskPtr task, float thr
     cudaMemcpyAsync(task->h_pred_score.data(), d_score, sizeof(float), cudaMemcpyDeviceToHost, stream);
     cudaMemcpyAsync(task->h_pred_label.data(), d_label, sizeof(uint8_t), cudaMemcpyDeviceToHost, stream);
     cudaMemcpyAsync(task->h_anomaly_map.data(), d_raw_anomaly_map, width_ * height_ * sizeof(float), cudaMemcpyDeviceToHost, stream);
-    
-    // Wait for memcpy to complete before accessing data
-    cudaStreamSynchronize(stream);
-    
-    // Print first 5 elements of anomaly map
-    std::cout << "[Debug] First 5 elements of anomaly map: " << std::endl;
-    for (int i = 0; i < 5; i++) {
-        std::cout << "Element " << i << ": " << task->h_anomaly_map[i] << std::endl;
-    }
-    
-    // Print 5 elements from the middle of the anomaly map
-    int middle_idx = (width_ * height_) / 2;
-    std::cout << "[Debug] 5 elements from middle of anomaly map: " << std::endl;
-    for (int i = 0; i < 5; i++) {
-        std::cout << "Element " << middle_idx + i << ": " << task->h_anomaly_map[middle_idx + i] << std::endl;
-    }
 
     // Use workspace buffers instead of allocating new ones
     uint8_t* d_mask = (uint8_t*)d_workspace_mask_.get();
