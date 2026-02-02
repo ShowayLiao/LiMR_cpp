@@ -195,97 +195,51 @@ Dashboard::~Dashboard() {
 void Dashboard::UpdateData(const pipeline::FrameTaskPtr& task) {
     if (!task || !task->is_valid) return;
     
-    // Save current task data
     current_task = task;
     
-    // Update recent processing time
     if (task->end_time > task->start_time) {
         recent_processing_time = task->end_time - task->start_time;
     }
     
-    // If task contains valid data, update textures
     if (!task->original_image.empty()) {
-        // Update original image texture
         glBindTexture(GL_TEXTURE_2D, tex_frame);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, task->original_image.cols, task->original_image.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, task->original_image.data);
     }
     
-    // Update heatmap texture (using CUDA-OpenGL Interop to update directly from device memory)
     if (task->d_final_heatmap) {
-        // 1. 检查映射是否成功
-        cudaError_t err = cudaGraphicsMapResources(1, &cuda_res_heatmap, 0);
-        if (err != cudaSuccess) {
-            std::cerr << "[Error] Heatmap Map failed: " << cudaGetErrorString(err) << std::endl;
-        } else {
-            cudaArray_t tex_array;
-            cudaGraphicsSubResourceGetMappedArray(&tex_array, cuda_res_heatmap, 0, 0);
-            
-            // 2. 检查拷贝是否报错
-            err = cudaMemcpy2DToArray(
-                tex_array, 0, 0,
-                task->d_final_heatmap.get(),
-                task->target_width * 4 * sizeof(uint8_t),
-                task->target_width * 4 * sizeof(uint8_t),
-                task->target_height,
-                cudaMemcpyDeviceToDevice
-            );
-            
-            if (err != cudaSuccess) {
-                std::cout << "[Error] Heatmap Copy failed: " << cudaGetErrorString(err) << std::endl;
-            }
-            
-            cudaGraphicsUnmapResources(1, &cuda_res_heatmap, 0);
-        }
+        cudaStreamSynchronize(0);
+        cudaGraphicsMapResources(1, &cuda_res_heatmap, 0);
+        cudaArray_t tex_array;
+        cudaGraphicsSubResourceGetMappedArray(&tex_array, cuda_res_heatmap, 0, 0);
+        cudaMemcpy2DToArray(tex_array, 0, 0, task->d_final_heatmap.get(), task->target_width * 4 * sizeof(uint8_t), task->target_width * 4 * sizeof(uint8_t), task->target_height, cudaMemcpyDeviceToDevice);
+        cudaGraphicsUnmapResources(1, &cuda_res_heatmap, 0);
     }
     
-    // Update overlay texture from GPU memory
     if (task->d_final_overlay) {
+        cudaStreamSynchronize(0);
         cudaGraphicsMapResources(1, &cuda_res_overlay, 0);
         cudaArray_t tex_array;
         cudaGraphicsSubResourceGetMappedArray(&tex_array, cuda_res_overlay, 0, 0);
-        
-        // Use task target size for memory copy parameters
-        cudaMemcpy2DToArray(
-            tex_array, 0, 0,
-            task->d_final_overlay.get(),
-            task->target_width * 4 * sizeof(uint8_t),
-            task->target_width * 4 * sizeof(uint8_t),
-            task->target_height,
-            cudaMemcpyDeviceToDevice
-        );
-        
+        cudaMemcpy2DToArray(tex_array, 0, 0, task->d_final_overlay.get(), task->target_width * 4 * sizeof(uint8_t), task->target_width * 4 * sizeof(uint8_t), task->target_height, cudaMemcpyDeviceToDevice);
         cudaGraphicsUnmapResources(1, &cuda_res_overlay, 0);
     } else if (!task->original_image.empty()) {
-        // If no overlay data, fallback to original image
         glBindTexture(GL_TEXTURE_2D, tex_overlay);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, task->original_image.cols, task->original_image.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, task->original_image.data);
     }
     
-    // Update combined texture from GPU memory
     if (task->d_final_overlay) {
+        cudaStreamSynchronize(0);
         cudaGraphicsMapResources(1, &cuda_res_combined, 0);
         cudaArray_t tex_array;
         cudaGraphicsSubResourceGetMappedArray(&tex_array, cuda_res_combined, 0, 0);
-        
-        // Use task target size for memory copy parameters
-        cudaMemcpy2DToArray(
-            tex_array, 0, 0,
-            task->d_final_overlay.get(),
-            task->target_width * 4 * sizeof(uint8_t),
-            task->target_width * 4 * sizeof(uint8_t),
-            task->target_height,
-            cudaMemcpyDeviceToDevice
-        );
-        
+        cudaMemcpy2DToArray(tex_array, 0, 0, task->d_final_overlay.get(), task->target_width * 4 * sizeof(uint8_t), task->target_width * 4 * sizeof(uint8_t), task->target_height, cudaMemcpyDeviceToDevice);
         cudaGraphicsUnmapResources(1, &cuda_res_combined, 0);
     } else if (!task->original_image.empty()) {
-        // If no combined data, fallback to original image
         glBindTexture(GL_TEXTURE_2D, tex_combined);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, task->original_image.cols, task->original_image.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, task->original_image.data);
     }
     
-    // For CUDA Interop mode, texture content is updated by PostProcessor, no need to call glTexImage2D here
-    // Just need to ensure texture ID is valid
+    glFlush();
 }
 
 void Dashboard::GetTextureIDs(unsigned int& tex_frame_out, unsigned int& tex_heatmap_out, unsigned int& tex_mask_out) {
@@ -332,31 +286,17 @@ void Dashboard::UpdateTextures() {
 }
 
 void Dashboard::Render(int display_w, int display_h) {
-    // Save current task for recycling after update
-    pipeline::FrameTaskPtr old_task = current_task;
+    pipeline::FrameTaskPtr prev_task = current_task;
     
-    // Update backend logic
     UpdateTextures();
-
-    // Print texture IDs to ensure they are not 0
-    // static int render_count = 0;
-    // if (render_count % 30 == 0) { // Print every 30 frames
-    //     std::cout << "[Dashboard] Rendering frame " << render_count << std::endl;
-    //     std::cout << "  - tex_frame: " << tex_frame << std::endl;
-    //     std::cout << "  - tex_heatmap: " << tex_heatmap << std::endl;
-    //     std::cout << "  - tex_overlay: " << tex_overlay << std::endl;
-    // }
-    // render_count++;
 
     float sideBarWidth = 350.0f;
 
-    // Draw two parts
     DrawSidePanel(sideBarWidth, (float)display_h);
     DrawMainView(sideBarWidth, (float)display_w - sideBarWidth, (float)display_h);
     
-    // Recycle old task back to pool
-    if (old_task && pipeline) {
-        pipeline->return_task(old_task);
+    if (prev_task && prev_task != current_task && pipeline) {
+        pipeline->return_task(prev_task);
     }
 }
 

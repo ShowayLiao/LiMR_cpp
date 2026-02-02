@@ -90,45 +90,30 @@ void launchGenerateOverlayFromMask(uint8_t* d_mask, uchar4* d_out_overlay, int w
     generateOverlayFromMaskKernel<<<grid, block, 0, stream>>>(d_mask, d_out_overlay, w, h, threshold);
 }
 
-__global__ void combineImageWithOverlayKernel(uint8_t* d_original, uchar4* d_overlay, uchar4* d_out_combined, int w, int h) {
+__global__ void combineImageWithOverlayKernel(uchar4* d_original, uchar4* d_overlay, uchar4* d_out_combined, int w, int h) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x < w && y < h) {
         int idx = y * w + x;
         
-        // 直接按 uchar4 读取背景，因为上一步 Resize 已经转好了
-        // 注意：输入参数类型 uint8_t* d_original 可以强转为 uchar4*
-        uchar4 bg = ((uchar4*)d_original)[idx];
+        uchar4 orig = d_original[idx];
+        uchar4 over = d_overlay[idx];
         
-        // bg 已经是 RGB 顺序 (在 ResizeBGRToRGBA 中换过了)
-        uint8_t r = bg.x;
-        uint8_t g = bg.y;
-        uint8_t b = bg.z;
+        float a = over.w / 255.0f;
+        float inv_a = 1.0f - a;
         
-        // Get overlay pixel (RGBA format)
-        uchar4 overlay = d_overlay[idx];
-        uint8_t overlay_r = overlay.x;
-        uint8_t overlay_g = overlay.y;
-        uint8_t overlay_b = overlay.z;
-        uint8_t overlay_a = overlay.w;
+        uchar4 comb;
+        comb.x = (unsigned char)(orig.x * inv_a + over.x * a);
+        comb.y = (unsigned char)(orig.y * inv_a + over.y * a);
+        comb.z = (unsigned char)(orig.z * inv_a + over.z * a);
+        comb.w = 255;
         
-        // Calculate alpha blending
-        float alpha = overlay_a / 255.0f;
-        float inv_alpha = 1.0f - alpha;
-        
-        // Combine original image with overlay
-        uchar4 combined;
-        combined.x = static_cast<unsigned char>(r * inv_alpha + overlay_r * alpha);     // Red channel
-        combined.y = static_cast<unsigned char>(g * inv_alpha + overlay_g * alpha);     // Green channel
-        combined.z = static_cast<unsigned char>(b * inv_alpha + overlay_b * alpha);     // Blue channel
-        combined.w = 255;  // Fully opaque
-        
-        d_out_combined[idx] = combined;
+        d_out_combined[idx] = comb;
     }
 }
 
-void launchCombineImageWithOverlay(uint8_t* d_original, uchar4* d_overlay, uchar4* d_out_combined, int w, int h, cudaStream_t stream) {
+void launchCombineImageWithOverlay(uchar4* d_original, uchar4* d_overlay, uchar4* d_out_combined, int w, int h, cudaStream_t stream) {
     dim3 block(16, 16);
     dim3 grid((w + block.x - 1) / block.x, (h + block.y - 1) / block.y);
 
@@ -251,7 +236,7 @@ __global__ void resizeImageRGBAKernel_Optimized(uchar4* d_src, int src_w, int sr
         
         // d_dst[dst_idx] = d_src[src_idx]; 
         uchar4 pixel = d_src[src_idx];
-        pixel.w = 255; // 
+        // 保持原始的 alpha 值，不要硬编码为 255
         d_dst[dst_idx] = pixel;
     }
 }

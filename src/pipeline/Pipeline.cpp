@@ -1,4 +1,6 @@
 #include "pipeline/Pipeline.h"
+#include <thread>
+#include <chrono>
 
 namespace pipeline {
 
@@ -50,15 +52,24 @@ void Pipeline::setThreshold(float threshold) {
     std::cout << "[Pipeline] Threshold set to: " << threshold << std::endl;
 }
 
-FrameTaskPtr Pipeline::get_empty_task() {
+FrameTaskPtr Pipeline::get_empty_task()
+{
     FrameTaskPtr task;
-    if (task_pool_.try_pop(task)) {
+    if (task_pool_.try_pop(task))
+    {
         task->reset();
         return task;
-    } else {
-
-        return std::make_shared<FrameTask>();
     }
+    
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    if (task_pool_.try_pop(task))
+    {
+        task->reset();
+        return task;
+    }
+
+
+    return nullptr;
 }
 
 void Pipeline::return_task(FrameTaskPtr task) {

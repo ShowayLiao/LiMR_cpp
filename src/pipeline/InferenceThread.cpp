@@ -93,23 +93,25 @@ void InferenceThread::run() {
     std::cout << "[InferenceThread] Running..." << std::endl;
 
     while (running_) {
+        // [DEBUG] 标记进入等待状态
+        std::cout << "[InferenceThread] Waiting for task from queue..." << std::endl;
+        
         FrameTaskPtr task;
         input_queue_.pop(task);
         
-        // Check if task is valid (shutdown returns default-constructed task)
-        if (!task) {
-            // Queue was shutdown
-            break;
-        }
-        
+        if (!task) break;
+
         try {
+            // std::cout << "[InferenceThread] Processing Task ID: " << task->frame_id << std::endl;
+            
             // Record start time
             task->start_time = static_cast<double>(std::clock()) / CLOCKS_PER_SEC;
 
             // Step 1: Preprocessing (GPU-based) - Resize and normalize
             preprocessor_->process(task->original_image, m_d_trt_input.get(), stream_);
 
-            // Step 2: Running inference
+            // [DEBUG] 推理开始前的最后标记
+            std::cout << "[InferenceThread] Starting TensorRT Inference..." << std::endl;
             engine_->infer(m_d_trt_input.get(), 1);
 
             // Step 3: Get output buffers from engine
@@ -133,7 +135,8 @@ void InferenceThread::run() {
             // Record end time
             task->end_time = static_cast<double>(std::clock()) / CLOCKS_PER_SEC;
 
-            // Step 5: Push completed task to output queue
+            // [DEBUG] 完成标记
+            // 移除输出信息
             output_queue_.push(task);
 
         } catch (const std::exception& e) {

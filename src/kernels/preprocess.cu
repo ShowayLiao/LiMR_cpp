@@ -10,9 +10,10 @@ __global__ void layoutConvertNormKernel(uint8_t* src, float* dst, int w, int h, 
         
         if (skip_normalization) {
             // Only do layout conversion, no normalization
-            dst[0 * h * w + y * w + x] = (float)src[src_idx + 0];
-            dst[1 * h * w + y * w + x] = (float)src[src_idx + 1];
-            dst[2 * h * w + y * w + x] = (float)src[src_idx + 2];
+            float scale = 1.0f / 255.0f;
+            dst[0 * h * w + y * w + x] = (float)src[src_idx + 0] * scale;
+            dst[1 * h * w + y * w + x] = (float)src[src_idx + 1] * scale;
+            dst[2 * h * w + y * w + x] = (float)src[src_idx + 2] * scale;
         } else {
             // Do both layout conversion and normalization
             float scale = 1.0f / 255.0f;

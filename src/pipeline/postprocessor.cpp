@@ -8,7 +8,7 @@
 extern void launchGenerateMaskFromMap(float* d_map, uint8_t* d_mask, int w, int h, float threshold, cudaStream_t stream);
 extern void launchApplyColorMap(float* d_map, void* d_out_rgb, int w, int h, cudaStream_t stream);
 extern void launchGenerateOverlayFromMask(uint8_t* d_mask, uchar4* d_out_overlay, int w, int h, float threshold, cudaStream_t stream);
-extern void launchCombineImageWithOverlay(uint8_t* d_original, uchar4* d_overlay, uchar4* d_out_combined, int w, int h, cudaStream_t stream);
+extern void launchCombineImageWithOverlay(uchar4* d_original, uchar4* d_overlay, uchar4* d_out_combined, int w, int h, cudaStream_t stream);
 extern void launchResizeImage(uint8_t* d_src, int src_w, int src_h, uint8_t* d_dst, int dst_w, int dst_h, cudaStream_t stream);
 extern void launchResizeImageRGBA(uint8_t* d_src, int src_w, int src_h, uint8_t* d_dst, int dst_w, int dst_h, cudaStream_t stream);
 extern void launchResizeBGRToRGBA(uint8_t* d_src, int src_w, int src_h, uchar4* d_dst, int dst_w, int dst_h, cudaStream_t stream);
@@ -80,6 +80,22 @@ void PostProcessor::process(trt::TrtEngine* engine, FrameTaskPtr task, float thr
     cudaMemcpyAsync(task->h_pred_score.data(), d_score, sizeof(float), cudaMemcpyDeviceToHost, stream);
     cudaMemcpyAsync(task->h_pred_label.data(), d_label, sizeof(uint8_t), cudaMemcpyDeviceToHost, stream);
     cudaMemcpyAsync(task->h_anomaly_map.data(), d_raw_anomaly_map, width_ * height_ * sizeof(float), cudaMemcpyDeviceToHost, stream);
+    
+    // Wait for memcpy to complete before accessing data
+    cudaStreamSynchronize(stream);
+    
+    // Print first 5 elements of anomaly map
+    std::cout << "[Debug] First 5 elements of anomaly map: " << std::endl;
+    for (int i = 0; i < 5; i++) {
+        std::cout << "Element " << i << ": " << task->h_anomaly_map[i] << std::endl;
+    }
+    
+    // Print 5 elements from the middle of the anomaly map
+    int middle_idx = (width_ * height_) / 2;
+    std::cout << "[Debug] 5 elements from middle of anomaly map: " << std::endl;
+    for (int i = 0; i < 5; i++) {
+        std::cout << "Element " << middle_idx + i << ": " << task->h_anomaly_map[middle_idx + i] << std::endl;
+    }
 
     // Use workspace buffers instead of allocating new ones
     uint8_t* d_mask = (uint8_t*)d_workspace_mask_.get();
@@ -128,7 +144,7 @@ void PostProcessor::process(trt::TrtEngine* engine, FrameTaskPtr task, float thr
 
     // Combine resized original image with overlay and write to task's final buffer
     launchCombineImageWithOverlay(
-        (uint8_t*)d_workspace_original_resized_.get(),
+        (uchar4*)d_workspace_original_resized_.get(),
         (uchar4*)d_workspace_overlay_resized_.get(),
         (uchar4*)task->d_final_overlay.get(),
         rw,

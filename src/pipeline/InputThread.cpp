@@ -89,9 +89,8 @@ void InputThread::run() {
     size_t img_pixels = width_ * height_;
 
     while (running_) {
-        // Limit queue size, if 5 frames are堆积 and not processed, wait
-        if (input_queue_.size() > 5) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (input_queue_.size() > 3) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
         
@@ -111,37 +110,39 @@ void InputThread::run() {
         }
 
         // Get task object (prefer from pool, create new if none available)
-            FrameTaskPtr task;
-            if (pipeline_) {
-                task = pipeline_->get_empty_task();
-                task->frame_id = frame_id_++;
-                task->original_image = frame;
-                task->target_width = width_;
-                task->target_height = height_;
-                
-                // Upload original image to GPU memory
-                size_t original_img_bytes = frame.cols * frame.rows * 3 * sizeof(uint8_t);
-                if (!task->d_original_image) {
-                    task->d_original_image = make_device_buffer(original_img_bytes);
-                }
-                cudaMemcpyAsync(task->d_original_image.get(), frame.data, original_img_bytes, cudaMemcpyHostToDevice);
-                
-                // 注意：不再需要分配中间推理缓冲区，这些现在由InferenceThread管理
-            } else {
-                // 如果没有pipeline，使用原来的方式创建任务
-                task = std::make_shared<FrameTask>();
-                task->frame_id = frame_id_++;
-                task->original_image = frame;
-                task->target_width = width_;
-                task->target_height = height_;
-
-                // Upload original image to GPU memory
-                size_t original_img_bytes = frame.cols * frame.rows * 3 * sizeof(uint8_t);
+        FrameTaskPtr task;
+        if (pipeline_) {
+            task = pipeline_->get_empty_task();
+            if (!task) continue; // 如果池子里没任务了，跳过此帧
+            
+            task->frame_id = frame_id_++;
+            task->original_image = frame;
+            task->target_width = width_;
+            task->target_height = height_;
+            
+            // Upload original image to GPU memory
+            size_t original_img_bytes = frame.cols * frame.rows * 3 * sizeof(uint8_t);
+            if (!task->d_original_image) {
                 task->d_original_image = make_device_buffer(original_img_bytes);
-                cudaMemcpyAsync(task->d_original_image.get(), frame.data, original_img_bytes, cudaMemcpyHostToDevice);
-
-                // 注意：不再需要分配中间推理缓冲区，这些现在由InferenceThread管理
             }
+            cudaMemcpyAsync(task->d_original_image.get(), frame.data, original_img_bytes, cudaMemcpyHostToDevice);
+            
+            // 注意：不再需要分配中间推理缓冲区，这些现在由InferenceThread管理
+        } else {
+            // 如果没有pipeline，使用原来的方式创建任务
+            task = std::make_shared<FrameTask>();
+            task->frame_id = frame_id_++;
+            task->original_image = frame;
+            task->target_width = width_;
+            task->target_height = height_;
+
+            // Upload original image to GPU memory
+            size_t original_img_bytes = frame.cols * frame.rows * 3 * sizeof(uint8_t);
+            task->d_original_image = make_device_buffer(original_img_bytes);
+            cudaMemcpyAsync(task->d_original_image.get(), frame.data, original_img_bytes, cudaMemcpyHostToDevice);
+
+            // 注意：不再需要分配中间推理缓冲区，这些现在由InferenceThread管理
+        }
 
         // Push to input queue
         input_queue_.push(task);
