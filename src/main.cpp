@@ -9,7 +9,7 @@ int main(int, char**) {
     // 1. System window initialization
     if (!glfwInit()) return 1;
     const char* glsl_version = "#version 130";
-    GLFWwindow* window = glfwCreateWindow(1600, 900, "LiMR Industrial Detector", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(1600, 900, "AnomaRT - anomalib Runtime", NULL, NULL);
     if (!window) return 1;
     glfwMakeContextCurrent(window);
     glfwSwapInterval(0); // Enable vertical sync

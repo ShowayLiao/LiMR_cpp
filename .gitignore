@@ -2,9 +2,15 @@
 .vscode/
 .build/
 build/
+out/
 bin/
 input/
-3rdparty/
+# Source dependencies are Git submodules. Do not commit generated files inside
+# them, but do keep their submodule entries and .gitmodules tracked.
+3rdparty/*/build/
+3rdparty/*/out/
+3rdparty/*/.vs/
+3rdparty/*/.cache/
 
 # Cache directories
 .cache/
@@ -56,3 +62,6 @@ cuda/
 TensorRT-*/
 
 .trae/
+
+logs/
+test/

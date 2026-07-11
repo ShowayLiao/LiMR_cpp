@@ -4,7 +4,7 @@
 
 ### 1.1 Core Features
 
-inference_LiMR is a TensorRT-based real-time anomaly detection system specifically designed for video stream analysis. The system supports both single-engine and dual-engine inference modes, capable of efficiently generating anomaly heatmaps and providing an intuitive user interface for configuration and monitoring.
+anomalib-runtime (AnomaRT) is a TensorRT-based native runtime for real-time anomaly detection and video stream analysis. It supports anomalib-compatible ONNX models, single-engine and dual-engine inference modes, anomaly heatmaps, and an interactive configuration interface.
 
 ### 1.2 Technology Stack
 
@@ -34,11 +34,11 @@ inference_LiMR is a TensorRT-based real-time anomaly detection system specifical
 ## 2. Directory Structure
 
 ```
-inference_LiMR/
+anomalib-runtime/
 ├── build/                    # Build output directory
 │   ├── Debug/                # Debug build output
 │   └── Release/              # Release build output
-├── doc/                      # Documentation directory
+├── docs/                     # Documentation directory
 │   ├── cmake.md              # CMake configuration documentation
 │   ├── install.md            # Installation instructions
 │   └── 安装方法.md            # Chinese installation instructions
@@ -93,7 +93,7 @@ inference_LiMR/
 
 ### 3.1 Overall Architecture
 
-inference_LiMR adopts a multi-threaded pipeline architecture, implementing a complete flow from video capture to inference and visualization. The system is mainly composed of the following core modules:
+anomalib-runtime adopts a multi-threaded pipeline architecture, implementing a complete flow from video capture to inference and visualization. The system is mainly composed of the following core modules:
 
 1. **Input Thread**: Responsible for reading frame data from the video source and performing initial processing
 2. **Inference Thread**: Executes model inference and related processing
@@ -360,7 +360,7 @@ cmake --build . --config Release
 ```bash
 # Run executable file
 cd build/Release
-limr.exe
+AnomaRT.exe
 ```
 
 ## 8. Code Optimization and Best Practices
@@ -503,7 +503,7 @@ limr.exe
 
 ## 11. Summary
 
-inference_LiMR is a feature-complete, high-performance real-time anomaly detection system that implements fast inference based on TensorRT and CUDA. The system adopts a modular design for easy extension and maintenance, and provides an intuitive user interface.
+anomalib-runtime is a high-performance native deployment companion for anomalib-compatible models. It implements fast TensorRT/CUDA inference with a modular architecture and an intuitive desktop interface.
 
 The project has broad application prospects in industrial quality inspection, real-time monitoring, and other fields. Through further performance optimization, feature enhancement, and code quality improvement, the system can be made more complete to meet the needs of more complex scenarios.
 

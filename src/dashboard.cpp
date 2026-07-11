@@ -307,7 +307,7 @@ void Dashboard::DrawSidePanel(float panel_width, float panel_height) {
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
     ImGui::Begin("ControlPanel", nullptr, flags);
 
-    ImGui::TextColored(ImVec4(0.22f, 0.64f, 1.0f, 1.0f), "LiMR DETECTOR");
+    ImGui::TextColored(ImVec4(0.22f, 0.64f, 1.0f, 1.0f), "AnomaRT");
     ImGui::Separator();
     ImGui::Spacing();
 

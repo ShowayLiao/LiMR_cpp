@@ -1,0 +1,13 @@
+.git
+.vs
+.vscode
+.cache
+build
+out
+bin
+logs
+input
+models
+*.engine
+*.exe
+*.dll

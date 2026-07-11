@@ -1,0 +1,21 @@
+{
+  "version": 4,
+  "configurePresets": [
+    {
+      "name": "windows-release",
+      "displayName": "Windows x64 Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/windows-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/dist/AnomaRT",
+        "LIMR_TRT_ROOT": "$env{LIMR_TRT_ROOT}",
+        "LIMR_OPENCV_DIR": "$env{LIMR_OPENCV_DIR}",
+        "LIMR_OPENCV_BIN_DIR": "$env{LIMR_OPENCV_BIN_DIR}"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "windows-release", "configurePreset": "windows-release" }
+  ]
+}

@@ -1,211 +1,136 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.21)
 
-project(limr LANGUAGES CUDA CXX)
+project(anomalib_runtime LANGUAGES CUDA CXX C)
 
-if(MSVC)
-    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/std:c++17>)
-else()
-    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-std=c++17>)
-endif()
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(OpenCV_DIR "C:/opencv_s/build/install")
-set(TRT_DIR "C:/tensorRT/TensorRT-10.12.0.36.Windows.win10.cuda-11.8/TensorRT-10.12.0.36")
+# All machine-specific paths are cache variables.  Set them through a CMake
+# preset, the command line, or the Windows build container; do not edit this
+# file for a particular developer machine.
+set(LIMR_TRT_ROOT "" CACHE PATH "TensorRT SDK root (contains include and lib)")
+set(LIMR_OPENCV_DIR "" CACHE PATH "Directory containing OpenCVConfig.cmake")
+set(LIMR_OPENCV_BIN_DIR "" CACHE PATH "Directory containing OpenCV runtime DLLs")
+set(LIMR_GLFW_DIR "${CMAKE_SOURCE_DIR}/3rdparty/glfw" CACHE PATH "GLFW source root")
+set(LIMR_IMGUI_DIR "${CMAKE_SOURCE_DIR}/3rdparty/imgui" CACHE PATH "Dear ImGui source root")
+set(LIMR_EXTRA_RUNTIME_DLLS "" CACHE STRING "Additional runtime DLL paths, separated by semicolons")
 
-set(GLFW_DIR "${CMAKE_SOURCE_DIR}/3rdparty/glfw-3.4.bin.WIN64")
-set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/3rdparty/imgui-1.92.5")
+if(NOT WIN32)
+    message(FATAL_ERROR "AnomaRT currently builds a Windows CUDA/TensorRT application. Use the Windows build container or a Windows host.")
+endif()
+if(NOT LIMR_TRT_ROOT)
+    message(FATAL_ERROR "LIMR_TRT_ROOT is required. Point it at the TensorRT SDK root.")
+endif()
+if(NOT EXISTS "${LIMR_TRT_ROOT}/include/NvInfer.h")
+    message(FATAL_ERROR "LIMR_TRT_ROOT does not look like a TensorRT SDK: ${LIMR_TRT_ROOT}")
+endif()
+if(LIMR_OPENCV_DIR)
+    set(OpenCV_DIR "${LIMR_OPENCV_DIR}" CACHE PATH "" FORCE)
+endif()
+if(NOT OpenCV_DIR)
+    message(FATAL_ERROR "LIMR_OPENCV_DIR is required and must contain OpenCVConfig.cmake.")
+endif()
 
-find_package(CUDA REQUIRED)
-include_directories(${CUDA_INCLUDE_DIRS})
-enable_language(CUDA)
+find_package(CUDAToolkit REQUIRED)
+find_package(OpenCV REQUIRED CONFIG)
 
-include_directories(${PROJECT_SOURCE_DIR}/include)
+if(NOT LIMR_OPENCV_BIN_DIR)
+    get_filename_component(_opencv_prefix "${OpenCV_DIR}/../.." ABSOLUTE)
+    set(LIMR_OPENCV_BIN_DIR "${_opencv_prefix}/bin" CACHE PATH "Directory containing OpenCV runtime DLLs" FORCE)
+endif()
 
-include_directories(${TRT_DIR}/include)
-link_directories(${TRT_DIR}/lib)
-include_directories(${TRT_DIR}/samples/common)
+foreach(required_dir IN ITEMS "${LIMR_GLFW_DIR}/include" "${LIMR_IMGUI_DIR}")
+    if(NOT EXISTS "${required_dir}")
+        message(FATAL_ERROR "Required bundled dependency is missing: ${required_dir}")
+    endif()
+endforeach()
 
-find_package(OpenCV)
-include_directories(${OpenCV_INCLUDE_DIRS})
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory("${LIMR_GLFW_DIR}" "${CMAKE_BINARY_DIR}/_deps/glfw")
 
-include_directories(${GLFW_DIR}/include)
-link_directories(${GLFW_DIR}/lib-vc2019)
+file(GLOB IMGUI_SOURCES CONFIGURE_DEPENDS
+    "${LIMR_IMGUI_DIR}/*.cpp"
+    "${LIMR_IMGUI_DIR}/backends/imgui_impl_glfw.cpp"
+    "${LIMR_IMGUI_DIR}/backends/imgui_impl_opengl3.cpp")
+file(GLOB_RECURSE SRCS CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/*.cpp")
+file(GLOB_RECURSE SRCS_CU CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/*.cu")
 
-include_directories(${IMGUI_DIR})
-include_directories(${IMGUI_DIR}/backends)
-
-file(GLOB IMGUI_SOURCES
-    "${IMGUI_DIR}/*.cpp"
-    "${IMGUI_DIR}/backends/imgui_impl_glfw.cpp"
-    "${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp"
-)
-
-file(GLOB_RECURSE SRCS ${PROJECT_SOURCE_DIR}/src/*.cpp)
-file(GLOB_RECURSE SRCS_CU ${PROJECT_SOURCE_DIR}/src/*.cu)
-
-list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/pipeline.cpp")
-list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/video_thread.cpp")
-list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/inference.cpp")
-list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/inference_runner.cpp")
-list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/model_loader.cpp")
-list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/postprocess.cpp")
-list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/preprocess.cpp")
-list(REMOVE_ITEM SRCS "${PROJECT_SOURCE_DIR}/src/utils.cpp")
+list(REMOVE_ITEM SRCS
+    "${PROJECT_SOURCE_DIR}/src/pipeline.cpp"
+    "${PROJECT_SOURCE_DIR}/src/video_thread.cpp"
+    "${PROJECT_SOURCE_DIR}/src/inference.cpp"
+    "${PROJECT_SOURCE_DIR}/src/inference_runner.cpp"
+    "${PROJECT_SOURCE_DIR}/src/model_loader.cpp"
+    "${PROJECT_SOURCE_DIR}/src/postprocess.cpp"
+    "${PROJECT_SOURCE_DIR}/src/preprocess.cpp"
+    "${PROJECT_SOURCE_DIR}/src/utils.cpp")
 list(REMOVE_ITEM SRCS_CU "${PROJECT_SOURCE_DIR}/src/utils.cu")
 
-list(APPEND SRCS ${SRCS_CU})
-
-add_executable(limr ${SRCS} ${IMGUI_SOURCES})
-
+add_executable(AnomaRT ${SRCS} ${SRCS_CU} ${IMGUI_SOURCES})
 add_executable(test_pipeline
-    ${PROJECT_SOURCE_DIR}/test/test_pipeline.cpp
-    ${PROJECT_SOURCE_DIR}/src/engine/trt_engine.cpp
-    ${PROJECT_SOURCE_DIR}/src/kernels/preprocess.cu
-    ${PROJECT_SOURCE_DIR}/src/pipeline/preprocessor.cpp
-    ${PROJECT_SOURCE_DIR}/src/pipeline/postprocessor.cpp
-    ${PROJECT_SOURCE_DIR}/src/pipeline/InputThread.cpp
-    ${PROJECT_SOURCE_DIR}/src/pipeline/InferenceThread.cpp
-    ${PROJECT_SOURCE_DIR}/src/pipeline/Pipeline.cpp
-    ${PROJECT_SOURCE_DIR}/src/kernels/postprocess_mask.cu
-    ${PROJECT_SOURCE_DIR}/src/common/kernels.cu
-)
-
+    "${PROJECT_SOURCE_DIR}/test/test_pipeline.cpp"
+    "${PROJECT_SOURCE_DIR}/src/engine/trt_engine.cpp"
+    "${PROJECT_SOURCE_DIR}/src/kernels/preprocess.cu"
+    "${PROJECT_SOURCE_DIR}/src/pipeline/preprocessor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/pipeline/postprocessor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/pipeline/InputThread.cpp"
+    "${PROJECT_SOURCE_DIR}/src/pipeline/InferenceThread.cpp"
+    "${PROJECT_SOURCE_DIR}/src/pipeline/Pipeline.cpp"
+    "${PROJECT_SOURCE_DIR}/src/kernels/postprocess_mask.cu"
+    "${PROJECT_SOURCE_DIR}/src/common/kernels.cu")
 add_executable(test_input_thread
-    ${PROJECT_SOURCE_DIR}/test/test_input_thread.cpp
-    ${PROJECT_SOURCE_DIR}/src/pipeline/InputThread.cpp
-    ${PROJECT_SOURCE_DIR}/src/pipeline/InferenceThread.cpp
-    ${PROJECT_SOURCE_DIR}/src/pipeline/Pipeline.cpp
-)
+    "${PROJECT_SOURCE_DIR}/test/test_input_thread.cpp"
+    "${PROJECT_SOURCE_DIR}/src/pipeline/InputThread.cpp"
+    "${PROJECT_SOURCE_DIR}/src/pipeline/InferenceThread.cpp"
+    "${PROJECT_SOURCE_DIR}/src/pipeline/Pipeline.cpp")
 
+foreach(target IN ITEMS AnomaRT test_pipeline test_input_thread)
+    target_include_directories(${target} PRIVATE
+        "${PROJECT_SOURCE_DIR}/include"
+        "${LIMR_TRT_ROOT}/include"
+        "${LIMR_TRT_ROOT}/samples/common"
+        "${OpenCV_INCLUDE_DIRS}"
+        "${LIMR_GLFW_DIR}/include"
+        "${LIMR_IMGUI_DIR}"
+        "${LIMR_IMGUI_DIR}/backends")
+    target_link_directories(${target} PRIVATE "${LIMR_TRT_ROOT}/lib")
+    target_compile_features(${target} PRIVATE cxx_std_17)
+endforeach()
 
-target_link_libraries(limr nvinfer_10)
-target_link_libraries(limr cudart)
-target_link_libraries(limr nvonnxparser_10)
-target_link_libraries(limr ${OpenCV_LIBS})
-target_link_libraries(limr glfw3 opengl32)
-target_link_libraries(limr nppc)
-target_link_libraries(limr nppial)
-target_link_libraries(limr nppist)
-target_link_libraries(limr nppig)
-
-target_link_libraries(test_pipeline nvinfer_10)
-target_link_libraries(test_pipeline cudart)
-target_link_libraries(test_pipeline nvonnxparser_10)
-target_link_libraries(test_pipeline ${OpenCV_LIBS})
-target_link_libraries(test_pipeline nppc)
-target_link_libraries(test_pipeline nppial)
-target_link_libraries(test_pipeline nppist)
-target_link_libraries(test_pipeline nppig)
-
-target_link_libraries(test_input_thread ${OpenCV_LIBS})
-target_link_libraries(test_input_thread cudart)
-
+target_link_libraries(AnomaRT PRIVATE nvinfer_10 CUDA::cudart nvonnxparser_10 ${OpenCV_LIBS} glfw opengl32 CUDA::nppc CUDA::nppial CUDA::nppist CUDA::nppig)
+target_link_libraries(test_pipeline PRIVATE nvinfer_10 CUDA::cudart nvonnxparser_10 ${OpenCV_LIBS} CUDA::nppc CUDA::nppial CUDA::nppist CUDA::nppig)
+target_link_libraries(test_input_thread PRIVATE ${OpenCV_LIBS} CUDA::cudart)
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/install" CACHE PATH "..." FORCE)
+    set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/dist" CACHE PATH "Install location" FORCE)
 endif()
+install(TARGETS AnomaRT RUNTIME DESTINATION bin)
+include(InstallRequiredSystemLibraries)
 
-install(TARGETS limr
-    RUNTIME DESTINATION bin
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-)
-
-# 设置需要的动态库列表
-set(REQUIRED_DLLS
-    # --- OpenCV (仅保留核心模块) ---
-    opencv_core455.dll
-    opencv_imgcodecs455.dll
-    opencv_imgproc455.dll
-    opencv_videoio455.dll
-    opencv_videoio_ffmpeg455_64.dll  # MP4解码必备，不做链接但必须存在
-
-    # --- CUDA / NPP (根据你的代码依赖) ---
-    cudart64_110.dll
-    nppig64_11.dll      # Resize (nppiResize)
-    nppidei64_11.dll    # SwapChannels (nppiSwapChannels)
-    nppc64_11.dll       # NPP Core (基础依赖)
-
-    # --- TensorRT 隐式依赖 (最容易漏的) ---
-    cublas64_11.dll     # 矩阵运算核心
-    cublasLt64_11.dll   # 轻量级矩阵运算 (RTX 30/40系常需)
-    zlibwapi.dll        # TensorRT解压模型依赖 (经常缺失!)
-
-    # --- TensorRT 核心 ---
-    nvinfer_10.dll
-    nvinfer_plugin_10.dll
-    nvinfer_builder_resource_10.dll
-    nvonnxparser_10.dll
-)
-
-# 构建需要拷贝的DLL列表
-set(ALL_DLLS "")
-
-# 查找并添加OpenCV DLLs
-set(OPENCV_BIN_DIR "${OpenCV_DIR}/x64/vc16/bin")
-foreach(dll_name ${REQUIRED_DLLS})
-    if(dll_name MATCHES "^opencv_")
-        set(dll_path "${OPENCV_BIN_DIR}/${dll_name}")
-        if(EXISTS "${dll_path}")
-            list(APPEND ALL_DLLS "${dll_path}")
-        else()
-            message(WARNING "OpenCV DLL not found: ${dll_path}")
-        endif()
-    endif()
-endforeach()
-
-# 查找并添加CUDA/NPP DLLs
-set(CUDA_BIN_DIR "${CUDA_TOOLKIT_ROOT_DIR}/bin")
-foreach(dll_name ${REQUIRED_DLLS})
-    if(dll_name MATCHES "^(cudart|npp|cublas)")
-        set(dll_path "${CUDA_BIN_DIR}/${dll_name}")
-        if(EXISTS "${dll_path}")
-            list(APPEND ALL_DLLS "${dll_path}")
-        else()
-            # 尝试查找不同版本的CUDA DLL
-            file(GLOB dll_candidates "${CUDA_BIN_DIR}/${dll_name}")
-            if(dll_candidates)
-                list(APPEND ALL_DLLS ${dll_candidates})
-            else()
-                message(WARNING "CUDA/NPP DLL not found: ${dll_path}")
-            endif()
-        endif()
-    endif()
-endforeach()
-
-# 查找并添加TensorRT DLLs
-set(TRT_BIN_DIR "${TRT_DIR}/lib")
-foreach(dll_name ${REQUIRED_DLLS})
-    if(dll_name MATCHES "^(nvinfer|nvonnxparser|zlibwapi)")
-        set(dll_path "${TRT_BIN_DIR}/${dll_name}")
-        if(EXISTS "${dll_path}")
-            list(APPEND ALL_DLLS "${dll_path}")
-        else()
-            message(WARNING "TensorRT DLL not found: ${dll_path}")
-        endif()
-    endif()
-endforeach()
-
-# 安装DLLs
-if(ALL_DLLS)
-    install(FILES ${ALL_DLLS} DESTINATION bin)
-
-    # 构建后拷贝DLLs
-    foreach(DLL_FILE ${ALL_DLLS})
-        add_custom_command(TARGET limr POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${DLL_FILE}"
-            "$<TARGET_FILE_DIR:limr>"
-        )
-        add_custom_command(TARGET test_pipeline POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${DLL_FILE}"
-            "$<TARGET_FILE_DIR:test_pipeline>"
-        )
-        add_custom_command(TARGET test_input_thread POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${DLL_FILE}"
-            "$<TARGET_FILE_DIR:test_input_thread>"
-        )
+# Runtime deployment is deliberately collected by family rather than hard-coded
+# DLL versions. This makes the package follow the exact CUDA/OpenCV SDK pinned
+# by the build image. NVIDIA's redistribution terms still apply.
+set(RUNTIME_DLLS "${LIMR_EXTRA_RUNTIME_DLLS}")
+file(GLOB _opencv_dlls "${LIMR_OPENCV_BIN_DIR}/opencv_*.dll")
+file(GLOB _cuda_dlls
+    "${CUDAToolkit_BIN_DIR}/cudart64*.dll"
+    "${CUDAToolkit_BIN_DIR}/npp*.dll"
+    "${CUDAToolkit_BIN_DIR}/cublas*.dll")
+file(GLOB _trt_dlls
+    "${LIMR_TRT_ROOT}/lib/nvinfer*.dll"
+    "${LIMR_TRT_ROOT}/lib/nvonnxparser*.dll"
+    "${LIMR_TRT_ROOT}/lib/zlibwapi.dll")
+list(APPEND RUNTIME_DLLS ${_opencv_dlls} ${_cuda_dlls} ${_trt_dlls} ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS})
+list(REMOVE_DUPLICATES RUNTIME_DLLS)
+if(RUNTIME_DLLS)
+    install(FILES ${RUNTIME_DLLS} DESTINATION bin)
+    foreach(dll IN LISTS RUNTIME_DLLS)
+        add_custom_command(TARGET AnomaRT POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${dll}" "$<TARGET_FILE_DIR:AnomaRT>")
     endforeach()
+else()
+    message(WARNING "No runtime DLLs were found. The executable will build but the distributable package will be incomplete.")
 endif()

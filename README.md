@@ -1,8 +1,8 @@
 <div align="center">
-  <h1>🏭 LiMR: Real-time Industrial Defect Detection System (C++)</h1>
+  <h1>🏭 AnomaRT: Native Runtime for anomalib Models</h1>
   
   <p>
-    <b>High-performance industrial vision solution based on TensorRT 10 and CUDA 11</b>
+    <b>High-performance C++/CUDA/TensorRT deployment runtime for anomalib ONNX models</b>
   </p>
 
   <p>
@@ -19,9 +19,11 @@
   </p>
   <p>
     <a href="PAPER_LINK_HERE">📄 Paper</a> • 
-    <a href="https://github.com/ShowayLiao/LiMR">🐍 Python Prototype</a>
+    <span>Community deployment companion for anomalib models</span>
   </p>
 </div>
+
+> AnomaRT is an independent community project and is not an official anomalib project or affiliated with its maintainers.
 
 ---
 
@@ -68,12 +70,12 @@
 > Don't want to code, just want to run the software?
 
 1. Download the latest release: 👉 **[Download (Release)]()**
-2. Need help? Check the documentation: 📖 **[User Manual](./doc/User Manual_CN.md)**
+2. Need help? Check the documentation: 📖 **[User Manual](./docs/User_Manual_CN.md)**
 
 ### 👨‍💻 I'm a Developer
 > Want to modify the source code or develop secondary applications?
 
-Please refer to the compilation and build guide: 🛠️ **[Developer Environment Setup](./doc/install.md)**
+Please refer to the compilation and build guide: 🛠️ **[Developer Environment Setup](./docs/install.md)**
 
 ---
 
@@ -129,7 +131,7 @@ The system adopts a modular design, achieving efficient interoperation between c
 
 > If this project helps your research or work, please give it a ⭐ **Star** on GitHub!
 
-If you find any bugs or have improvement suggestions, please submit an [Issue](https://github.com/ShowayLiao/LiMR/issues) or Pull Request.
+If you find any bugs or have improvement suggestions, please submit an [Issue](https://github.com/ShowayLiao/anomalib-runtime/issues) or Pull Request.
 
 ## 📜 License
 

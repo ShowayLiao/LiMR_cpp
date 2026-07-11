@@ -1,8 +1,8 @@
 <div align="center">
-  <h1>🏭 LiMR: 工业缺陷实时推理检测系统 (C++)</h1>
+  <h1>🏭 AnomaRT：anomalib 模型原生推理运行时</h1>
   
   <p>
-    <b>基于 TensorRT 10 和 CUDA 11 的高性能工业视觉解决方案</b>
+    <b>面向 anomalib ONNX 模型的高性能 C++/CUDA/TensorRT 部署运行时</b>
   </p>
 
   <p>
@@ -19,9 +19,11 @@
   </p>
   <p>
     <a href="PAPER_LINK_HERE">📄 论文地址</a> • 
-    <a href="https://github.com/ShowayLiao/LiMR">🐍 Python 原型项目</a>
+    <span>anomalib 模型的社区部署配套项目</span>
   </p>
 </div>
+
+> AnomaRT 是独立的社区项目，不是 anomalib 官方项目，也不隶属于其维护团队。
 
 ---
 
@@ -68,12 +70,12 @@
 > 不需要写代码，只想运行软件？
 
 1. 下载最新发布的安装包：👉 **[点击下载 (Release)]()**
-2. 遇到问题？查看文档：📖 **[用户手册 (User Manual)](./doc/User_Manual_CN.md)**
+2. 遇到问题？查看文档：📖 **[用户手册 (User Manual)](./docs/User_Manual_CN.md)**
 
 ### 👨‍💻 我是开发者
 > 想要修改源码或二次开发？
 
-请查阅编译与构建指南：🛠️ **[开发者环境配置指南](./doc/安装方法.md)**
+请查阅编译与构建指南：🛠️ **[开发者环境配置指南](./docs/安装方法.md)**
 
 ---
 
@@ -129,7 +131,7 @@
 
 > 如果本项目对您的研究或工作有所帮助，欢迎在 GitHub 上点一个 ⭐ **Star**！
 
-如果您发现任何 Bug 或有改进建议，欢迎提交 [Issue](https://github.com/ShowayLiao/LiMR/issues) 或 Pull Request。
+如果您发现任何 Bug 或有改进建议，欢迎提交 [Issue](https://github.com/ShowayLiao/anomalib-runtime/issues) 或 Pull Request。
 
 ## 📜 License
 

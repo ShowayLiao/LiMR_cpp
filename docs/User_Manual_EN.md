@@ -4,7 +4,7 @@
 
 ### 1.1 Introduction
 
-inference_LiMR is a real-time anomaly detection system based on TensorRT, designed for video stream analysis. This user manual provides detailed instructions on how to use the system, including dashboard operation, system startup, interface definitions, and ONNX export requirements.
+AnomaRT is the desktop application of anomalib-runtime, a TensorRT-based native runtime for real-time anomaly detection and video stream analysis. This user manual covers dashboard operation, system startup, interfaces, and ONNX export requirements.
 
 ### 1.2 Key Features
 
@@ -34,7 +34,7 @@ Before starting the system, ensure the following requirements are met:
    - Ensure all required DLL files are present (see Developer's Manual for details)
 
 2. **Run the application**
-   - Double-click `inference_LiMR.exe` to start the system
+   - Double-click `AnomaRT.exe` to start the system
    - The dashboard window will appear
 
 3. **Initialize the system**
@@ -151,7 +151,7 @@ The dashboard supports the following display modes:
 
 ### 5.1 Model Requirements
 
-To ensure compatibility with inference_LiMR, models must meet the following requirements when exported to ONNX format:
+To ensure compatibility with AnomaRT, models must meet the following requirements when exported to ONNX format:
 
 | Requirement | Description |
 |-------------|-------------|
@@ -256,6 +256,6 @@ After exporting the model to ONNX, it needs to be converted to TensorRT engine f
 
 ## 7. Summary
 
-inference_LiMR provides a powerful and intuitive solution for real-time anomaly detection in video streams. By following this user manual, you can effectively configure and operate the system to meet your specific needs.
+AnomaRT provides a native, high-performance solution for real-time anomaly detection in video streams. By following this user manual, you can configure and operate the system to meet your specific needs.
 
 For more advanced configuration and customization options, please refer to the [Developer's Manual](开发者手册.md).
