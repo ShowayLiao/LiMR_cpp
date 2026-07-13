@@ -22,15 +22,15 @@ AnomaRT 是 anomalib-runtime 的桌面应用：一个基于 TensorRT 的原生�
 启动系统前，请确保满足以下要求：
 
 - Windows 10/11 操作系统
-- 已安装 CUDA 11.6+
-- 已安装 TensorRT 8.0+
-- 已安装 OpenCV 4.5+
-- 兼容的 NVIDIA GPU（当前支持30系显卡，其他架构显卡后续会单独适配） 
+- 兼容的 NVIDIA GPU 和驱动
+- 包含全部 DLL 的完整 AnomaRT 发布目录
+
+终端用户不需要单独安装 CUDA Toolkit、TensorRT SDK 或 OpenCV。
 
 ### 2.2 启动步骤
 
 1. **准备可执行文件**
-   - 导航到 `build/Release` 目录
+   - 导航到解压后的 AnomaRT 发布目录
    - 确保所有必需的 DLL 文件都存在（详情请参见开发者手册）
 
 2. **运行应用程序**

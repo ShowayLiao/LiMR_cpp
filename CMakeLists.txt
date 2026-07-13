@@ -111,7 +111,7 @@ install(TARGETS AnomaRT RUNTIME DESTINATION bin)
 include(InstallRequiredSystemLibraries)
 
 # Runtime deployment is deliberately collected by family rather than hard-coded
-# DLL versions. This makes the package follow the exact CUDA/OpenCV SDK pinned
+# DLL versions. This makes the package follow the exact CUDA and OpenCV SDKs pinned
 # by the build image. NVIDIA's redistribution terms still apply.
 set(RUNTIME_DLLS "${LIMR_EXTRA_RUNTIME_DLLS}")
 file(GLOB _opencv_dlls "${LIMR_OPENCV_BIN_DIR}/opencv_*.dll")
