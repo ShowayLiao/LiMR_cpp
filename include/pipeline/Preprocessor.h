@@ -11,6 +11,8 @@ public:
     void process(const cv::Mat& src_img, void* d_dst_buffer, cudaStream_t stream);
 
 private:
+    void ensureInputCapacity(size_t required_bytes, cudaStream_t stream);
+
     int dst_w_;
     int dst_h_;
     bool skip_normalization_;

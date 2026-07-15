@@ -29,11 +29,12 @@ int main() {
             std::cout << "Received task " << task->frame_id 
                       << " - Image size: " << task->original_image.cols << "x" << task->original_image.rows << std::endl;
             
-            // Verify GPU memory allocation
-            if (task->d_input && task->d_pred_score && task->d_pred_label && task->d_anomaly_map) {
-                std::cout << "  GPU memory allocated successfully" << std::endl;
+            // InputThread owns only capture-stage data; inference buffers belong to InferenceThread.
+            if (!task->original_image.empty() && task->d_original_image) {
+                std::cout << "  Capture-stage GPU buffer allocated successfully" << std::endl;
             } else {
-                std::cerr << "  ERROR: GPU memory not allocated" << std::endl;
+                std::cerr << "  ERROR: capture-stage data was not allocated" << std::endl;
+                return 1;
             }
         }
         
@@ -44,6 +45,14 @@ int main() {
     // Stop input thread
     input_thread.stop();
     std::cout << "Input thread stopped" << std::endl;
+
+    // A failed open must still leave a joinable thread that stop()/destruction can reclaim.
+    {
+        pipeline::InputThread invalid_input("input/does-not-exist.avi", 256, 256);
+        invalid_input.start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        invalid_input.stop();
+    }
 
     std::cout << "Test completed. Received " << task_count << " tasks." << std::endl;
 

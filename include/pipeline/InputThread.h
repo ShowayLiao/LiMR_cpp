@@ -31,7 +31,8 @@ private:
     cv::VideoCapture cap_;
     std::thread thread_;
     std::atomic<bool> running_;
-    SafeQueue<FrameTaskPtr> input_queue_;
+    // A tiny queue bounds latency; the producer keeps only the newest frames.
+    SafeQueue<FrameTaskPtr> input_queue_{2};
     long frame_id_;
     Pipeline* pipeline_; // Pipeline指针，用于获取任务池
 };

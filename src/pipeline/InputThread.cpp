@@ -29,17 +29,15 @@ void InputThread::start() {
 }
 
 void InputThread::stop() {
-    if (running_) {
-        running_ = false;
-        if (thread_.joinable()) {
-            thread_.join();
-        }
-        if (cap_.isOpened()) {
-            cap_.release();
-        }
-        // Don't shutdown the queue here, just reset it
-        input_queue_.reset();
+    running_ = false;
+    if (thread_.joinable()) {
+        thread_.join();
     }
+    if (cap_.isOpened()) {
+        cap_.release();
+    }
+    // Don't shutdown the queue here, just reset it.
+    input_queue_.reset();
 }
 
 bool InputThread::isRunning() const {
@@ -86,14 +84,7 @@ void InputThread::run() {
     std::cout << "[InputThread] Video source opened successfully" << std::endl;
 
     cv::Mat frame;
-    size_t img_pixels = width_ * height_;
-
     while (running_) {
-        if (input_queue_.size() > 3) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            continue;
-        }
-        
         // Read frame with timeout
         if (!cap_.read(frame)) {
             std::cerr << "[InputThread] Failed to read frame, restarting..." << std::endl;
@@ -116,36 +107,60 @@ void InputThread::run() {
             if (!task) continue; // 如果池子里没任务了，跳过此帧
             
             task->frame_id = frame_id_++;
-            task->original_image = frame;
+            // VideoCapture may reuse frame storage on the next read. A queued task must own
+            // the host image until preprocessing has consumed it.
+            task->original_image = frame.clone();
             task->target_width = width_;
             task->target_height = height_;
             
             // Upload original image to GPU memory
             size_t original_img_bytes = frame.cols * frame.rows * 3 * sizeof(uint8_t);
-            if (!task->d_original_image) {
-                task->d_original_image = make_device_buffer(original_img_bytes);
+            if (!task->ensureOriginalImageBuffer(original_img_bytes)) {
+                std::cerr << "[InputThread] Invalid original-image buffer size" << std::endl;
+                pipeline_->return_task(task);
+                continue;
             }
-            cudaMemcpyAsync(task->d_original_image.get(), frame.data, original_img_bytes, cudaMemcpyHostToDevice);
+            const cudaError_t uploadStatus = cudaMemcpyAsync(
+                task->d_original_image.get(), task->original_image.data, original_img_bytes, cudaMemcpyHostToDevice);
+            if (uploadStatus != cudaSuccess) {
+                std::cerr << "[InputThread] Failed to upload original image: "
+                          << cudaGetErrorString(uploadStatus) << std::endl;
+                task->is_valid = false;
+                pipeline_->return_task(task);
+                continue;
+            }
             
             // 注意：不再需要分配中间推理缓冲区，这些现在由InferenceThread管理
         } else {
             // 如果没有pipeline，使用原来的方式创建任务
             task = std::make_shared<FrameTask>();
             task->frame_id = frame_id_++;
-            task->original_image = frame;
+            task->original_image = frame.clone();
             task->target_width = width_;
             task->target_height = height_;
 
             // Upload original image to GPU memory
             size_t original_img_bytes = frame.cols * frame.rows * 3 * sizeof(uint8_t);
-            task->d_original_image = make_device_buffer(original_img_bytes);
-            cudaMemcpyAsync(task->d_original_image.get(), frame.data, original_img_bytes, cudaMemcpyHostToDevice);
+            if (!task->ensureOriginalImageBuffer(original_img_bytes)) {
+                std::cerr << "[InputThread] Invalid original-image buffer size" << std::endl;
+                continue;
+            }
+            const cudaError_t uploadStatus = cudaMemcpyAsync(
+                task->d_original_image.get(), task->original_image.data, original_img_bytes, cudaMemcpyHostToDevice);
+            if (uploadStatus != cudaSuccess) {
+                std::cerr << "[InputThread] Failed to upload original image: "
+                          << cudaGetErrorString(uploadStatus) << std::endl;
+                continue;
+            }
 
             // 注意：不再需要分配中间推理缓冲区，这些现在由InferenceThread管理
         }
 
-        // Push to input queue
-        input_queue_.push(task);
+        // Keep latency bounded. Any task displaced by a newer frame is returned to the pool.
+        std::optional<FrameTaskPtr> discarded = input_queue_.push_latest(std::move(task));
+        if (discarded && pipeline_) {
+            pipeline_->return_task(std::move(*discarded));
+        }
 
         // Control frame rate
         // std::this_thread::sleep_for(std::chrono::milliseconds(33)); // ~30 FPS

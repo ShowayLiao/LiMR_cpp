@@ -15,6 +15,7 @@ public:
     InferenceThread(
         SafeQueue<FrameTaskPtr>& input_queue,
         SafeQueue<FrameTaskPtr>& output_queue,
+        SafeQueue<FrameTaskPtr>& task_pool,
         trt::TrtEngine* engine,
         int render_width = 256,
         int render_height = 256,
@@ -32,6 +33,7 @@ private:
 
     SafeQueue<FrameTaskPtr>& input_queue_;
     SafeQueue<FrameTaskPtr>& output_queue_;
+    SafeQueue<FrameTaskPtr>& task_pool_;
     trt::TrtEngine* engine_;
     int render_width_;
     int render_height_;
@@ -46,13 +48,15 @@ private:
     DeviceBuffer m_d_trt_input = nullptr;
     DeviceBuffer m_d_raw_anomaly_map = nullptr;
     DeviceBuffer m_d_raw_mask = nullptr;
+    size_t trt_input_bytes_ = 0;
+    size_t anomaly_map_bytes_ = 0;
     
     std::unique_ptr<Preprocessor> preprocessor_;
     std::unique_ptr<PostProcessor> postprocessor_;
-    bool running_;
+    std::atomic<bool> running_{false};
     std::thread thread_;
     cudaStream_t stream_;
-    float threshold_ = 0.5f;
+    std::atomic<float> threshold_{0.5f};
     bool skip_normalization_;
 };
 

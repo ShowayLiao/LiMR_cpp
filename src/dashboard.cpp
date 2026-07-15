@@ -4,6 +4,7 @@
 #include <iostream>
 #include <fstream>
 #include <algorithm>
+#include <limits>
 #include <thread>
 #include "pipeline/Preprocessor.h"
 #include "pipeline/Postprocessor.h"
@@ -68,6 +69,59 @@ static bool process_image_input(const std::string& image_path, cv::Mat& out_imag
     return !out_image.empty();
 }
 
+static bool check_cuda_status(cudaError_t status, const char* operation) {
+    if (status == cudaSuccess) return true;
+    std::cerr << "[Dashboard] " << operation << " failed: " << cudaGetErrorString(status) << std::endl;
+    return false;
+}
+
+static bool synchronize_active_resolution(trt::TrtEngine& engine,
+                                          int requested_width,
+                                          int requested_height,
+                                          bool& is_dynamic,
+                                          int& active_width,
+                                          int& active_height) {
+    const nvinfer1::Dims input_shape = engine.getInputShape();
+    if (input_shape.nbDims != 4 || input_shape.d[2] <= 0 || input_shape.d[3] <= 0 ||
+        input_shape.d[2] > std::numeric_limits<int>::max() ||
+        input_shape.d[3] > std::numeric_limits<int>::max()) {
+        std::cerr << "[Dashboard] Engine returned an unresolved NCHW input shape" << std::endl;
+        return false;
+    }
+
+    is_dynamic = engine.isInputSpatialDynamic();
+    active_height = static_cast<int>(input_shape.d[2]);
+    active_width = static_cast<int>(input_shape.d[3]);
+    std::cout << "[Dashboard] Resolution requested: " << requested_width << "x" << requested_height
+              << ", engine active: " << active_width << "x" << active_height
+              << ", input bytes: " << engine.getInputSize() << std::endl;
+    return true;
+}
+
+static bool upload_rgba_texture(cudaGraphicsResource_t resource,
+                                const void* device_buffer,
+                                int width,
+                                int height,
+                                const char* label) {
+    if (!resource || !device_buffer || width <= 0 || height <= 0) return false;
+
+    if (!check_cuda_status(cudaGraphicsMapResources(1, &resource, 0), label)) return false;
+
+    cudaArray_t texture_array = nullptr;
+    bool uploaded = check_cuda_status(
+        cudaGraphicsSubResourceGetMappedArray(&texture_array, resource, 0, 0), label);
+    if (uploaded) {
+        const size_t row_bytes = static_cast<size_t>(width) * 4U * sizeof(uint8_t);
+        uploaded = check_cuda_status(
+            cudaMemcpy2DToArray(texture_array, 0, 0, device_buffer, row_bytes, row_bytes,
+                                 static_cast<size_t>(height), cudaMemcpyDeviceToDevice),
+            label);
+    }
+
+    const bool unmapped = check_cuda_status(cudaGraphicsUnmapResources(1, &resource, 0), label);
+    return uploaded && unmapped;
+}
+
 // Helper function: Check if input is a valid video file
 static bool is_valid_video_file(const std::string& video_path) {
     cv::VideoCapture cap(video_path);
@@ -94,6 +148,17 @@ Dashboard::Dashboard() {
 }
 
 void Dashboard::InitResources() {
+    if (width <= 0 || height <= 0) {
+        std::cerr << "[Dashboard] Refusing to initialize textures with an invalid size" << std::endl;
+        return;
+    }
+
+    if (resources_initialized && (texture_width_ != width || texture_height_ != height)) {
+        std::cout << "[Dashboard] Recreating textures for active resolution "
+                  << width << "x" << height << std::endl;
+        ReleaseResources();
+    }
+
     if (!resources_initialized) {
         // Generate texture IDs
         glGenTextures(1, &tex_frame);
@@ -111,7 +176,12 @@ void Dashboard::InitResources() {
         glBindTexture(GL_TEXTURE_2D, 0);
         
         // Register as CUDA resource
-        cudaGraphicsGLRegisterImage(&cuda_res_heatmap, tex_heatmap, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsWriteDiscard);
+        if (!check_cuda_status(cudaGraphicsGLRegisterImage(
+                &cuda_res_heatmap, tex_heatmap, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsWriteDiscard),
+                "Register heatmap texture")) {
+            ReleaseResources();
+            return;
+        }
         
         glGenTextures(1, &tex_overlay);
         glBindTexture(GL_TEXTURE_2D, tex_overlay);
@@ -122,7 +192,12 @@ void Dashboard::InitResources() {
         glBindTexture(GL_TEXTURE_2D, 0);
         
         // Register overlay texture as CUDA resource
-        cudaGraphicsGLRegisterImage(&cuda_res_overlay, tex_overlay, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsWriteDiscard);
+        if (!check_cuda_status(cudaGraphicsGLRegisterImage(
+                &cuda_res_overlay, tex_overlay, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsWriteDiscard),
+                "Register overlay texture")) {
+            ReleaseResources();
+            return;
+        }
         
         glGenTextures(1, &tex_combined);
         glBindTexture(GL_TEXTURE_2D, tex_combined);
@@ -133,7 +208,12 @@ void Dashboard::InitResources() {
         glBindTexture(GL_TEXTURE_2D, 0);
         
         // Register combined texture as CUDA resource
-        cudaGraphicsGLRegisterImage(&cuda_res_combined, tex_combined, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsWriteDiscard);
+        if (!check_cuda_status(cudaGraphicsGLRegisterImage(
+                &cuda_res_combined, tex_combined, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsWriteDiscard),
+                "Register combined texture")) {
+            ReleaseResources();
+            return;
+        }
         
         // Print texture IDs to ensure they are not 0
         // std::cout << "[Dashboard] Texture IDs generated: " << std::endl;
@@ -173,6 +253,10 @@ void Dashboard::InitResources() {
 }
 
 Dashboard::~Dashboard() {
+    ReleaseResources();
+}
+
+void Dashboard::ReleaseResources() {
     if (cuda_res_heatmap) {
         cudaGraphicsUnregisterResource(cuda_res_heatmap);
         cuda_res_heatmap = nullptr;
@@ -190,6 +274,9 @@ Dashboard::~Dashboard() {
     if (tex_heatmap) glDeleteTextures(1, &tex_heatmap);
     if (tex_overlay) glDeleteTextures(1, &tex_overlay);
     if (tex_combined) glDeleteTextures(1, &tex_combined);
+    tex_frame = tex_heatmap = tex_overlay = tex_combined = 0;
+    texture_width_ = texture_height_ = 0;
+    resources_initialized = false;
 }
 
 void Dashboard::UpdateData(const pipeline::FrameTaskPtr& task) {
@@ -274,6 +361,8 @@ void Dashboard::UpdateTextures() {
             if (task->is_valid) {
                 // Use new UpdateData method to update textures
                 UpdateData(task);
+            } else {
+                pipeline->return_task(std::move(task));
             }
         }
     }
@@ -335,21 +424,21 @@ void Dashboard::DrawSidePanel(float panel_width, float panel_height) {
     ImGui::Combo("Precision", &current_precision_idx, precision_items, 2);
 
     // Resolution selection
-    ImGui::Combo("Resolution", &current_resolution_idx, resolution_items, 4);
+    if (!model_input_is_dynamic_ && is_initialized) {
+        ImGui::Text("Resolution: %dx%d (Model Input)", width, height);
+    } else {
+        ImGui::Combo("Resolution", &current_resolution_idx, resolution_items, 2);
+    }
     
     // Update width and height based on selected resolution
-    if (current_resolution_idx == 0) { // 256x256
-        this->width = 256;
-        this->height = 256;
-    } else if (current_resolution_idx == 1) { // 512x512
-        this->width = 512;
-        this->height = 512;
-    } else if (current_resolution_idx == 2) { // 640x480
-        this->width = 640;
-        this->height = 480;
-    } else if (current_resolution_idx == 3) { // 1024x768
-        this->width = 1024;
-        this->height = 768;
+    if (model_input_is_dynamic_ || !is_initialized) {
+        if (current_resolution_idx == 0) {
+            this->width = 224;
+            this->height = 224;
+        } else {
+            this->width = 448;
+            this->height = 448;
+        }
     }
 
     ImGui::Spacing();
@@ -448,9 +537,15 @@ void Dashboard::DrawSidePanel(float panel_width, float panel_height) {
                         
                         // Create and load TensorRT engine
                         engine = std::make_unique<trt::TrtEngine>();
-                        if (!engine->load(engine_path_a, precision)) {
+                        if (!engine->load(engine_path_a, precision, height, width)) {
                             std::cerr << "Failed to load engine: " << engine_path_a << std::endl;
                             return;
+                        }
+                        model_input_is_dynamic_ = engine->isInputSpatialDynamic();
+                        if (!model_input_is_dynamic_) {
+                            const nvinfer1::Dims inputShape = engine->getInputShape();
+                            height = static_cast<int>(inputShape.d[2]);
+                            width = static_cast<int>(inputShape.d[3]);
                         }
                         
                         // Initialize resources if not already initialized
@@ -487,6 +582,7 @@ void Dashboard::DrawSidePanel(float panel_width, float panel_height) {
                                     UpdateData(task);
                                     break;
                                 }
+                                pipeline->return_task(std::move(task));
                             }
                             std::this_thread::sleep_for(std::chrono::milliseconds(100));
                         }
@@ -509,9 +605,15 @@ void Dashboard::DrawSidePanel(float panel_width, float panel_height) {
                     
                     // Create and load TensorRT engine
                     engine = std::make_unique<trt::TrtEngine>();
-                    if (!engine->load(engine_path_a, precision)) {
+                    if (!engine->load(engine_path_a, precision, height, width)) {
                         std::cerr << "Failed to load engine: " << engine_path_a << std::endl;
                         return;
+                    }
+                    model_input_is_dynamic_ = engine->isInputSpatialDynamic();
+                    if (!model_input_is_dynamic_) {
+                        const nvinfer1::Dims inputShape = engine->getInputShape();
+                        height = static_cast<int>(inputShape.d[2]);
+                        width = static_cast<int>(inputShape.d[3]);
                     }
                     
                     // Create pipeline
@@ -696,9 +798,15 @@ void Dashboard::DrawSidePanel(float panel_width, float panel_height) {
                         
                         // Recreate and load TensorRT engine
                         engine = std::make_unique<trt::TrtEngine>();
-                        if (!engine->load(engine_path_a, precision)) {
+                        if (!engine->load(engine_path_a, precision, height, width)) {
                             std::cerr << "Failed to load engine: " << engine_path_a << std::endl;
                             return;
+                        }
+                        model_input_is_dynamic_ = engine->isInputSpatialDynamic();
+                        if (!model_input_is_dynamic_) {
+                            const nvinfer1::Dims inputShape = engine->getInputShape();
+                            height = static_cast<int>(inputShape.d[2]);
+                            width = static_cast<int>(inputShape.d[3]);
                         }
                         
                         // Initialize resources if not already initialized
@@ -732,6 +840,7 @@ void Dashboard::DrawSidePanel(float panel_width, float panel_height) {
                                     UpdateData(task);
                                     break;
                                 }
+                                pipeline->return_task(std::move(task));
                             }
                             std::this_thread::sleep_for(std::chrono::milliseconds(100));
                         }
@@ -754,9 +863,15 @@ void Dashboard::DrawSidePanel(float panel_width, float panel_height) {
                     
                     // Recreate and load TensorRT engine
                     engine = std::make_unique<trt::TrtEngine>();
-                    if (!engine->load(engine_path_a, precision)) {
+                    if (!engine->load(engine_path_a, precision, height, width)) {
                         std::cerr << "Failed to load engine: " << engine_path_a << std::endl;
                         return;
+                    }
+                    model_input_is_dynamic_ = engine->isInputSpatialDynamic();
+                    if (!model_input_is_dynamic_) {
+                        const nvinfer1::Dims inputShape = engine->getInputShape();
+                        height = static_cast<int>(inputShape.d[2]);
+                        width = static_cast<int>(inputShape.d[3]);
                     }
                     
                     // Initialize resources if not already initialized

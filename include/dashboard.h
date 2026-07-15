@@ -33,6 +33,8 @@ private:
     void SetupStyle();
     void DrawSidePanel(float width, float height);
     void DrawMainView(float start_x, float width, float height);
+    void ReleaseResources();
+    bool IsTaskOutputCompatible(const pipeline::FrameTaskPtr& task) const;
     
     // --- Core business objects (managed by smart pointers) ---
     std::unique_ptr<AppConfig> appConfig;
@@ -43,6 +45,8 @@ private:
     bool is_initialized = false;
     bool is_running = false;
     bool resources_initialized = false;
+    int texture_width_ = 0;
+    int texture_height_ = 0;
     
     // Texture handles
     unsigned int tex_frame = 0;   
@@ -71,10 +75,13 @@ private:
     float defect_threshold = 0.5f;
     
     // Resolution settings
-    int width = 256;  // Default width
-    int height = 256; // Default height
-    const char* resolution_items[4] = { "256x256", "512x512", "640x480", "1024x768" };
-    int current_resolution_idx = 0; // Default to 256x256
+    int width = 224;  // Active model/render width for the running pipeline.
+    int height = 224; // Active model/render height for the running pipeline.
+    int requested_width_ = 224;
+    int requested_height_ = 224;
+    const char* resolution_items[2] = { "224x224", "448x448" };
+    int current_resolution_idx = 0;
+    bool model_input_is_dynamic_ = true;
     
     // Recent processing time (to avoid display flickering)
     double recent_processing_time = 0.0;

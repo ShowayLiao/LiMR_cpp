@@ -4,6 +4,7 @@
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include "../common/CudaMemory.hpp"
+#include "pipeline/FrameBufferLayout.h"
 
 namespace pipeline {
 
@@ -35,6 +36,8 @@ struct FrameTask {
     // Allocated buffer sizes
     int allocated_width;
     int allocated_height;
+    size_t original_image_capacity_bytes;
+    size_t output_buffer_capacity_bytes;
 
     std::vector<float> h_pred_score;
     std::vector<uint8_t> h_pred_label;
@@ -61,6 +64,8 @@ struct FrameTask {
         target_height(0),
         allocated_width(0),
         allocated_height(0),
+        original_image_capacity_bytes(0),
+        output_buffer_capacity_bytes(0),
         gl_heatmap_tex_id(0),
         gl_mask_tex_id(0),
         gl_overlay_tex_id(0),
@@ -83,30 +88,38 @@ struct FrameTask {
         target_width = 0;
         target_height = 0;
         
-        // Reset buffer size records
-        allocated_width = 0;
-        allocated_height = 0;
+        // Keep allocation metadata: pooled tasks may safely reuse larger buffers.
     }
 
-    void ensureOutputBuffers() {
-        // Skip if target size not set
-        if (target_width <= 0 || target_height <= 0) return;
+    bool ensureOriginalImageBuffer(size_t required_bytes) {
+        if (required_bytes == 0) return false;
 
-        // Check if buffers need resizing
-        if (!d_final_heatmap || allocated_width != target_width || allocated_height != target_height) {
-            
-            // 4-channel RGBA size
-            size_t size = target_width * target_height * 4 * sizeof(uint8_t);
-
-            // std::cout << "[FrameTask] Resizing output buffers to " << target_width << "x" << target_height << std::endl;
-            
-            d_final_heatmap = make_device_buffer(size);
-            d_final_overlay = make_device_buffer(size);
-            
-            // Update allocated size records
-            allocated_width = target_width;
-            allocated_height = target_height;
+        if (!d_original_image || original_image_capacity_bytes < required_bytes) {
+            d_original_image = make_device_buffer(required_bytes);
+            original_image_capacity_bytes = required_bytes;
         }
+        return true;
+    }
+
+    bool hasOutputBufferCapacity() const {
+        size_t required_bytes = 0;
+        return tryGetFrameBufferBytes(target_width, target_height, 4, required_bytes) &&
+            d_final_heatmap && d_final_overlay && output_buffer_capacity_bytes >= required_bytes;
+    }
+
+    bool ensureOutputBuffers() {
+        size_t required_bytes = 0;
+        if (!tryGetFrameBufferBytes(target_width, target_height, 4, required_bytes)) return false;
+
+        if (!d_final_heatmap || !d_final_overlay || output_buffer_capacity_bytes < required_bytes) {
+            d_final_heatmap = make_device_buffer(required_bytes);
+            d_final_overlay = make_device_buffer(required_bytes);
+            output_buffer_capacity_bytes = required_bytes;
+        }
+
+        allocated_width = target_width;
+        allocated_height = target_height;
+        return true;
     }
 };
 

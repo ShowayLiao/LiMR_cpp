@@ -28,10 +28,15 @@ private:
     DeviceBuffer d_workspace_heatmap_model_;
     DeviceBuffer d_workspace_overlay_resized_;
     DeviceBuffer d_workspace_original_resized_;
+    DeviceBuffer d_heatmap_reduction_workspace_;
+    DeviceBuffer d_heatmap_min_;
+    DeviceBuffer d_heatmap_max_;
+    DeviceBuffer d_heatmap_invalid_;
+    size_t heatmap_reduction_workspace_bytes_ = 0;
     size_t allocated_size_model_ = 0;
     size_t allocated_size_render_ = 0;
     
-    void ensureWorkspace(int model_pixels, int render_pixels);
+    void ensureWorkspace(size_t model_pixels, size_t render_pixels);
 };
 
 }

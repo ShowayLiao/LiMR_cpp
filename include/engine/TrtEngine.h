@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <filesystem>
+#include "engine/InputShape.h"
 
 namespace trt {
 
@@ -18,12 +19,13 @@ enum class Precision {
 };
 
 struct Binding {
-    int index;
+    int index = -1;
     std::string name;
-    size_t size;
-    nvinfer1::Dims dims;
-    nvinfer1::DataType type;
-    bool isInput;
+    size_t size = 0;      // Bytes required by the active execution-context shape.
+    size_t capacity = 0;  // Bytes allocated at buffer; may exceed size after a shape shrink.
+    nvinfer1::Dims dims{};
+    nvinfer1::DataType type = nvinfer1::DataType::kFLOAT;
+    bool isInput = false;
     void* buffer = nullptr;
 };
 
@@ -41,11 +43,24 @@ public:
     TrtEngine();
     ~TrtEngine();
 
-    bool load(const std::string& modelPath, Precision precision = Precision::FP16);
+    bool load(const std::string& modelPath, Precision precision = Precision::FP16,
+              int dynamic_input_height = 224, int dynamic_input_width = 224);
 
-    void infer(void* inputData, int batchSize = 1);
+    // Configure the active NCHW input size for a dynamic engine before creating a pipeline.
+    bool setInputShape(int height, int width);
+    bool isInputSpatialDynamic() const;
+    static bool calculateTensorBytes(const nvinfer1::Dims& dims,
+                                     nvinfer1::DataType type,
+                                     size_t& bytes);
+    static std::filesystem::path getEngineCachePath(const std::filesystem::path& onnxPath,
+                                                    Precision precision,
+                                                    int profileHeight,
+                                                    int profileWidth);
+
+    void infer(void* inputData, int batchSize = 1, cudaStream_t stream = nullptr);
 
     void* getBuffer(const std::string& name);
+    const Binding* getTensorInfo(const std::string& name) const;
 
     nvinfer1::ICudaEngine* getEngine() const;
     nvinfer1::IExecutionContext* getContext() const;
@@ -63,12 +78,15 @@ public:
 
 private:
     bool loadFromPlan(const std::string& enginePath);
-    bool buildFromOnnx(const std::string& onnxPath, const std::string& enginePath, Precision precision);
+    bool buildFromOnnx(const std::string& onnxPath, const std::string& enginePath,
+                       Precision precision, int dynamic_input_height, int dynamic_input_width);
     bool saveEngine(const std::string& enginePath, const void* data, size_t size);
     std::vector<char> readBinaryFile(const std::string& path);
-    void allocateBuffers(int maxBatchSize);
+    bool allocateBuffers(int maxBatchSize);
+    bool updateBindingBuffers();
+    void clearLoadedEngine();
     void freeBuffers();
-    size_t getElementSize(nvinfer1::DataType type);
+    static size_t getElementSize(nvinfer1::DataType type);
 
     Logger logger_;
     std::unique_ptr<nvinfer1::IRuntime> runtime_;
@@ -78,6 +96,7 @@ private:
 
     std::map<std::string, Binding> bindings_;
     std::string input_name_;
+    bool input_spatial_dynamic_ = false;
     int max_batch_size_;
     bool initialized_;
 };

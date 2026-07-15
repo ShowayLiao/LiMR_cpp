@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "pipeline/InputThread.h"
 #include "pipeline/InferenceThread.h"
 #include "engine/TrtEngine.h"
@@ -26,11 +28,11 @@ public:
 
 private:
     InputThread input_thread_;
-    InferenceThread inference_thread_;
-    SafeQueue<FrameTaskPtr> output_queue_;
+    SafeQueue<FrameTaskPtr> output_queue_{1};
     SafeQueue<FrameTaskPtr> task_pool_; 
+    InferenceThread inference_thread_;
     trt::TrtEngine* engine_;
-    bool running_;
+    std::atomic<bool> running_{false};
 };
 
 } // namespace pipeline

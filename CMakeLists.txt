@@ -2,18 +2,26 @@ cmake_minimum_required(VERSION 3.10)
 
 project(limr LANGUAGES CUDA CXX)
 
+include(CTest)
+enable_testing()
+
 if(MSVC)
-    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/std:c++17>)
+    add_compile_options(
+        $<$<COMPILE_LANGUAGE:CXX>:/std:c++17>
+        $<$<COMPILE_LANGUAGE:CXX>:/utf-8>
+    )
 else()
     add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-std=c++17>)
 endif()
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(OpenCV_DIR "C:/opencv_s/build/install")
-set(TRT_DIR "C:/tensorRT/TensorRT-10.12.0.36.Windows.win10.cuda-11.8/TensorRT-10.12.0.36")
+set(OpenCV_DIR "C:/opencv_s/build/install" CACHE PATH "Path containing OpenCVConfig.cmake")
+set(TRT_DIR "C:/tensorRT/TensorRT-10.12.0.36.Windows.win10.cuda-11.8/TensorRT-10.12.0.36" CACHE PATH "TensorRT installation root")
 
-set(GLFW_DIR "${CMAKE_SOURCE_DIR}/3rdparty/glfw-3.4.bin.WIN64")
-set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/3rdparty/imgui-1.92.5")
+set(GLFW_DIR "${CMAKE_SOURCE_DIR}/3rdparty/glfw")
+set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/3rdparty/imgui")
 
 find_package(CUDA REQUIRED)
 include_directories(${CUDA_INCLUDE_DIRS})
@@ -29,7 +37,11 @@ find_package(OpenCV)
 include_directories(${OpenCV_INCLUDE_DIRS})
 
 include_directories(${GLFW_DIR}/include)
-link_directories(${GLFW_DIR}/lib-vc2019)
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(${GLFW_DIR} ${CMAKE_BINARY_DIR}/glfw)
 
 include_directories(${IMGUI_DIR})
 include_directories(${IMGUI_DIR}/backends)
@@ -72,17 +84,52 @@ add_executable(test_pipeline
 
 add_executable(test_input_thread
     ${PROJECT_SOURCE_DIR}/test/test_input_thread.cpp
+    ${PROJECT_SOURCE_DIR}/src/engine/trt_engine.cpp
+    ${PROJECT_SOURCE_DIR}/src/kernels/preprocess.cu
+    ${PROJECT_SOURCE_DIR}/src/pipeline/preprocessor.cpp
+    ${PROJECT_SOURCE_DIR}/src/pipeline/postprocessor.cpp
     ${PROJECT_SOURCE_DIR}/src/pipeline/InputThread.cpp
     ${PROJECT_SOURCE_DIR}/src/pipeline/InferenceThread.cpp
     ${PROJECT_SOURCE_DIR}/src/pipeline/Pipeline.cpp
+    ${PROJECT_SOURCE_DIR}/src/kernels/postprocess_mask.cu
+    ${PROJECT_SOURCE_DIR}/src/common/kernels.cu
 )
+
+add_executable(test_input_shape
+    ${PROJECT_SOURCE_DIR}/test/test_input_shape.cpp
+)
+
+add_executable(test_safe_queue
+    ${PROJECT_SOURCE_DIR}/test/test_safe_queue.cpp
+)
+
+add_executable(test_engine_contract
+    ${PROJECT_SOURCE_DIR}/test/test_engine_contract.cpp
+    ${PROJECT_SOURCE_DIR}/src/engine/trt_engine.cpp
+)
+
+add_executable(test_heatmap
+    ${PROJECT_SOURCE_DIR}/test/test_heatmap.cu
+    ${PROJECT_SOURCE_DIR}/src/common/kernels.cu
+)
+
+target_include_directories(test_input_shape PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(test_safe_queue PRIVATE ${PROJECT_SOURCE_DIR}/include)
+
+add_test(NAME input_shape_contract COMMAND test_input_shape)
+add_test(NAME safe_queue_contract COMMAND test_safe_queue)
+add_test(NAME engine_contract COMMAND test_engine_contract)
+set_tests_properties(engine_contract PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_test(NAME heatmap_contract COMMAND test_heatmap)
+add_test(NAME pipeline_model_contract COMMAND test_pipeline)
+set_tests_properties(pipeline_model_contract PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
 
 
 target_link_libraries(limr nvinfer_10)
 target_link_libraries(limr cudart)
 target_link_libraries(limr nvonnxparser_10)
 target_link_libraries(limr ${OpenCV_LIBS})
-target_link_libraries(limr glfw3 opengl32)
+target_link_libraries(limr glfw opengl32)
 target_link_libraries(limr nppc)
 target_link_libraries(limr nppial)
 target_link_libraries(limr nppist)
@@ -99,6 +146,17 @@ target_link_libraries(test_pipeline nppig)
 
 target_link_libraries(test_input_thread ${OpenCV_LIBS})
 target_link_libraries(test_input_thread cudart)
+target_link_libraries(test_input_thread nvinfer_10)
+target_link_libraries(test_input_thread nvonnxparser_10)
+target_link_libraries(test_input_thread nppc)
+target_link_libraries(test_input_thread nppial)
+target_link_libraries(test_input_thread nppist)
+target_link_libraries(test_input_thread nppig)
+
+target_link_libraries(test_engine_contract nvinfer_10)
+target_link_libraries(test_engine_contract cudart)
+target_link_libraries(test_engine_contract nvonnxparser_10)
+target_link_libraries(test_heatmap cudart)
 
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -206,6 +264,11 @@ if(ALL_DLLS)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${DLL_FILE}"
             "$<TARGET_FILE_DIR:test_input_thread>"
+        )
+        add_custom_command(TARGET test_engine_contract POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${DLL_FILE}"
+            "$<TARGET_FILE_DIR:test_engine_contract>"
         )
     endforeach()
 endif()
