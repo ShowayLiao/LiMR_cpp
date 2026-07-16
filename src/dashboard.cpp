@@ -9,11 +9,25 @@
 #include "pipeline/Preprocessor.h"
 #include "pipeline/Postprocessor.h"
 #include "common/CudaMemory.hpp"
+#include "common/FileDialog.h"
 #include "pipeline/Pipeline.h"
 
 #ifndef GL_BGR
 #define GL_BGR 0x80E0
 #endif
+
+namespace {
+
+constexpr char kMediaFileFilter[] =
+    "Image and video files\0"
+    "*.jpg;*.jpeg;*.png;*.bmp;*.tiff;*.tif;*.avi;*.mp4;*.mov;*.mkv;*.wmv;*.flv\0"
+    "All files\0*.*\0\0";
+
+constexpr char kModelFileFilter[] =
+    "Model files (*.onnx;*.engine)\0*.onnx;*.engine\0"
+    "All files\0*.*\0\0";
+
+}  // namespace
 
 // Helper function: Update texture (you can put this in utils.h, but for convenience it's written here directly)
 static void update_texture_internal(const cv::Mat& mat, unsigned int& texture_id) {
@@ -416,10 +430,23 @@ void Dashboard::DrawSidePanel(float panel_width, float panel_height) {
 
     // Configuration section
     ImGui::Text("Configuration");
-    ImGui::InputText("Video", video_path, 256);
-    
-    // Engine path input
-    ImGui::InputText("Model Path", engine_path_a, 256);
+    ImGui::SetNextItemWidth(190.0f);
+    ImGui::InputText("##InputPath", video_path, sizeof(video_path));
+    ImGui::SameLine();
+    if (ImGui::Button("...##BrowseInput")) {
+        common::selectFile(video_path, sizeof(video_path), kMediaFileFilter);
+    }
+    ImGui::SameLine();
+    ImGui::TextUnformatted("Input");
+
+    ImGui::SetNextItemWidth(190.0f);
+    ImGui::InputText("##ModelPath", engine_path_a, sizeof(engine_path_a));
+    ImGui::SameLine();
+    if (ImGui::Button("...##BrowseModel")) {
+        common::selectFile(engine_path_a, sizeof(engine_path_a), kModelFileFilter);
+    }
+    ImGui::SameLine();
+    ImGui::TextUnformatted("Model");
     
     ImGui::Combo("Precision", &current_precision_idx, precision_items, 2);
 

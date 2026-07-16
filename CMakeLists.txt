@@ -108,6 +108,11 @@ add_executable(test_engine_contract
     ${PROJECT_SOURCE_DIR}/src/engine/trt_engine.cpp
 )
 
+add_executable(test_file_dialog
+    ${PROJECT_SOURCE_DIR}/test/test_file_dialog.cpp
+    ${PROJECT_SOURCE_DIR}/src/common/FileDialog.cpp
+)
+
 add_executable(test_heatmap
     ${PROJECT_SOURCE_DIR}/test/test_heatmap.cu
     ${PROJECT_SOURCE_DIR}/src/common/kernels.cu
@@ -115,10 +120,12 @@ add_executable(test_heatmap
 
 target_include_directories(test_input_shape PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_include_directories(test_safe_queue PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(test_file_dialog PRIVATE ${PROJECT_SOURCE_DIR}/include)
 
 add_test(NAME input_shape_contract COMMAND test_input_shape)
 add_test(NAME safe_queue_contract COMMAND test_safe_queue)
 add_test(NAME engine_contract COMMAND test_engine_contract)
+add_test(NAME file_dialog_contract COMMAND test_file_dialog)
 set_tests_properties(engine_contract PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_test(NAME heatmap_contract COMMAND test_heatmap)
 add_test(NAME pipeline_model_contract COMMAND test_pipeline)
@@ -134,6 +141,9 @@ target_link_libraries(limr nppc)
 target_link_libraries(limr nppial)
 target_link_libraries(limr nppist)
 target_link_libraries(limr nppig)
+target_link_libraries(limr comdlg32)
+
+target_link_libraries(test_file_dialog PRIVATE comdlg32)
 
 target_link_libraries(test_pipeline nvinfer_10)
 target_link_libraries(test_pipeline cudart)
