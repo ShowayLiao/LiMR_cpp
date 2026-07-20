@@ -2,10 +2,14 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <future>
+#include <chrono>
 #include "imgui.h"
 #include "app_config.h"
 #include "pipeline/Pipeline.h"
 #include "engine/TrtEngine.h"
+#include "dashboard_task_state.h"
+#include "dashboard_render_options.h"
 #include <cuda_gl_interop.h>
 
 class Dashboard {
@@ -29,12 +33,30 @@ public:
     void UpdateTextures();
 
 private:
+    struct InitializationResult {
+        std::unique_ptr<AppConfig> app_config;
+        std::unique_ptr<trt::TrtEngine> engine;
+        std::unique_ptr<pipeline::Pipeline> pipeline;
+        pipeline::FrameTaskPtr first_task;
+        int active_width = 0;
+        int active_height = 0;
+        int render_width = 0;
+        int render_height = 0;
+        bool model_input_is_dynamic = true;
+        bool running = false;
+        std::string error;
+    };
+
     // --- Internal drawing methods ---
     void SetupStyle();
     void DrawSidePanel(float width, float height);
     void DrawMainView(float start_x, float width, float height);
     void ReleaseResources();
     bool IsTaskOutputCompatible(const pipeline::FrameTaskPtr& task) const;
+    void StartInitializationTask();
+    void PollInitializationTask();
+    void ResetRuntimeState();
+    void DrawTaskOverlay(float display_w, float display_h);
     
     // --- Core business objects (managed by smart pointers) ---
     std::unique_ptr<AppConfig> appConfig;
@@ -77,9 +99,11 @@ private:
     // Resolution settings
     int width = 224;  // Active model/render width for the running pipeline.
     int height = 224; // Active model/render height for the running pipeline.
-    int requested_width_ = 224;
-    int requested_height_ = 224;
-    const char* resolution_items[2] = { "224x224", "448x448" };
+    int render_width_ = 224;
+    int render_height_ = 224;
+    const char* resolution_items[kRenderResolutionOptionCount] = {
+        "224x224", "256x256", "448x448", "512x512", "1024x1024"
+    };
     int current_resolution_idx = 0;
     bool model_input_is_dynamic_ = true;
     
@@ -88,4 +112,10 @@ private:
     
     // Anomalib mode flag
     bool use_anomalib_mode_ = false;
+
+    DashboardTaskState task_state_ = DashboardTaskState::Idle;
+    std::future<InitializationResult> initialization_future_;
+    std::string task_message_;
+    std::string task_error_;
+    std::chrono::steady_clock::time_point task_feedback_until_{};
 };

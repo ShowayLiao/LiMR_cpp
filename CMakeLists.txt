@@ -113,6 +113,16 @@ add_executable(test_file_dialog
     ${PROJECT_SOURCE_DIR}/src/common/FileDialog.cpp
 )
 
+add_executable(test_dashboard_task_state
+    ${PROJECT_SOURCE_DIR}/test/test_dashboard_task_state.cpp
+)
+target_include_directories(test_dashboard_task_state PRIVATE ${PROJECT_SOURCE_DIR}/include)
+
+add_executable(test_dashboard_render_options
+    ${PROJECT_SOURCE_DIR}/test/test_dashboard_render_options.cpp
+)
+target_include_directories(test_dashboard_render_options PRIVATE ${PROJECT_SOURCE_DIR}/include)
+
 add_executable(test_heatmap
     ${PROJECT_SOURCE_DIR}/test/test_heatmap.cu
     ${PROJECT_SOURCE_DIR}/src/common/kernels.cu
@@ -126,6 +136,8 @@ add_test(NAME input_shape_contract COMMAND test_input_shape)
 add_test(NAME safe_queue_contract COMMAND test_safe_queue)
 add_test(NAME engine_contract COMMAND test_engine_contract)
 add_test(NAME file_dialog_contract COMMAND test_file_dialog)
+add_test(NAME dashboard_task_state_contract COMMAND test_dashboard_task_state)
+add_test(NAME dashboard_render_options_contract COMMAND test_dashboard_render_options)
 set_tests_properties(engine_contract PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_test(NAME heatmap_contract COMMAND test_heatmap)
 add_test(NAME pipeline_model_contract COMMAND test_pipeline)

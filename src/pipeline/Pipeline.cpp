@@ -4,9 +4,12 @@
 
 namespace pipeline {
 
-Pipeline::Pipeline(const std::string& video_source, int width, int height, trt::TrtEngine* engine, bool skip_normalization)
-    : input_thread_(video_source, width, height, this),
-      inference_thread_(input_thread_.getInputQueue(), output_queue_, task_pool_, engine, width, height, skip_normalization),
+Pipeline::Pipeline(const std::string& video_source,
+                   int render_width, int render_height,
+                   trt::TrtEngine* engine, bool skip_normalization)
+    : input_thread_(video_source, render_width, render_height, this),
+      inference_thread_(input_thread_.getInputQueue(), output_queue_, task_pool_, engine,
+                        render_width, render_height, skip_normalization),
       engine_(engine),
       running_(false) {
     for (int i = 0; i < 20; ++i) {

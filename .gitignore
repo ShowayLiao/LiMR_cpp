@@ -1,27 +1,53 @@
+# Local IDE settings
 .vs/
 .vscode/
+.idea/
+.trae/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.opendb
+
+# Local agent/workflow scratch data
+.agents/
+.superpowers/
+
+# Build directories
 .build/
-build/
+[Bb]uild/
+cmake-build-*/
+out/
+dist/
 bin/
+
+# Local inputs, models, and third-party dependencies
 input/
+models/
 3rdparty/
 
 # Cache directories
 .cache/
 
-# Model files
-models/*.engine
-models/*.onnx
+# Model and inference artifacts
+*.engine
+*.onnx
+*.plan
+*.trt
 
-# Output files
+# Generated outputs and runtime state
 output_*.png
 output/
+outputs/
+logs/
+imgui.ini
 
 # Log files
 *.log
+*.trace
 
 # IDE and editor files
-.idea/
 *.swp
 *.swo
 *~
@@ -39,8 +65,26 @@ ehthumbs.db
 CMakeCache.txt
 CMakeFiles/
 Makefile
+build.ninja
+.ninja_deps
+.ninja_log
 cmake_install.cmake
 install_manifest.txt
+CTestTestfile.cmake
+Testing/
+
+# C/C++ build artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.idb
+*.tlog
+*.lastbuildstate
+*.manifest
 
 # Binary files
 *.exe
@@ -48,11 +92,14 @@ install_manifest.txt
 *.so
 *.dylib
 
+# CUDA generated artifacts
+*.ptx
+*.cubin
+*.fatbin
+
 # Torch and CUDA files
 libtorch/
 cuda/
 
-# TensorRT files
+# TensorRT SDK directories
 TensorRT-*/
-
-.trae/
