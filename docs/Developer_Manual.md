@@ -38,7 +38,7 @@ inference_LiMR/
 ├── build/                    # Build output directory
 │   ├── Debug/                # Debug build output
 │   └── Release/              # Release build output
-├── doc/                      # Documentation directory
+├── docs/                     # Documentation directory
 │   ├── cmake.md              # CMake configuration documentation
 │   ├── install.md            # Installation instructions
 │   └── 安装方法.md            # Chinese installation instructions

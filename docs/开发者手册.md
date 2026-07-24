@@ -38,7 +38,7 @@ inference_LiMR/
 ├── build/                    # 构建输出目录
 │   ├── Debug/                # Debug 构建输出
 │   └── Release/              # Release 构建输出
-├── doc/                      # 文档目录
+├── docs/                     # 文档目录
 │   ├── cmake.md              # CMake 配置文档
 │   ├── install.md            # 安装说明
 │   └── 安装方法.md            # 中文安装说明

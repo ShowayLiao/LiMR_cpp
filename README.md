@@ -68,12 +68,12 @@
 > Don't want to code, just want to run the software?
 
 1. Download the latest release: 👉 **[Download (Release)]()**
-2. Need help? Check the documentation: 📖 **[User Manual](./doc/User Manual_CN.md)**
+2. Need help? Check the documentation: 📖 **[User Manual](./docs/User_Manual_CN.md)**
 
 ### 👨‍💻 I'm a Developer
 > Want to modify the source code or develop secondary applications?
 
-Please refer to the compilation and build guide: 🛠️ **[Developer Environment Setup](./doc/install.md)**
+Please refer to the compilation and build guide: 🛠️ **[Developer Environment Setup](./docs/install.md)**
 
 ---
 
