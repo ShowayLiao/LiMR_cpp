@@ -18,7 +18,7 @@
     <b>English</b> | <a href="./README_ch.md">中文</a>
   </p>
   <p>
-    <a href="PAPER_LINK_HERE">📄 Paper</a> • 
+    <a href="https://ieeexplore.ieee.org/document/11606365">📄 Paper</a> • 
     <a href="https://github.com/ShowayLiao/LiMR">🐍 Python Prototype</a>
   </p>
 </div>
