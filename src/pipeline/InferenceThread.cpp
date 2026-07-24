@@ -1,4 +1,5 @@
 #include "pipeline/InferenceThread.h"
+#include "pipeline/AnomalyMapShape.h"
 #include <iostream>
 #include <stdexcept>
 #include <ctime>
@@ -45,9 +46,12 @@ InferenceThread::InferenceThread(
     const trt::Binding* map_binding = engine_->getTensorInfo("anomaly_map");
     const trt::Binding* score_binding = engine_->getTensorInfo("pred_score");
     const trt::Binding* label_binding = engine_->getTensorInfo("pred_label");
-    if (!map_binding || map_binding->type != nvinfer1::DataType::kFLOAT ||
-        map_binding->dims.nbDims != 4 || map_binding->dims.d[0] != 1 || map_binding->dims.d[1] != 1) {
-        throw std::runtime_error("TensorRT anomaly_map contract must be FLOAT [1,1,H,W]");
+    const auto anomaly_map_shape = map_binding
+        ? parse_anomaly_map_shape(map_binding->dims)
+        : std::nullopt;
+    if (!map_binding || map_binding->type != nvinfer1::DataType::kFLOAT || !anomaly_map_shape) {
+        throw std::runtime_error(
+            "TensorRT anomaly_map contract must be FLOAT [1,1,H,W] or [1,H,W]");
     }
     if (!score_binding || score_binding->type != nvinfer1::DataType::kFLOAT ||
         score_binding->size < sizeof(float)) {
@@ -69,14 +73,8 @@ InferenceThread::InferenceThread(
     model_input_width_ = static_cast<int>(input_shape.d[3]);
     
     // Get model output shape
-    const nvinfer1::Dims output_shape = map_binding->dims;
-    if (output_shape.nbDims != 4 || output_shape.d[2] <= 0 || output_shape.d[3] <= 0 ||
-        output_shape.d[2] > std::numeric_limits<int>::max() ||
-        output_shape.d[3] > std::numeric_limits<int>::max()) {
-        throw std::runtime_error("TensorRT returned an invalid NCHW output shape");
-    }
-    model_output_height_ = static_cast<int>(output_shape.d[2]);
-    model_output_width_ = static_cast<int>(output_shape.d[3]);
+    model_output_height_ = anomaly_map_shape->height;
+    model_output_width_ = anomaly_map_shape->width;
     
     std::cout << "[InferenceThread] Model input size: " << model_input_width_ << "x" << model_input_height_ << std::endl;
     std::cout << "[InferenceThread] Model output size: " << model_output_width_ << "x" << model_output_height_ << std::endl;
@@ -89,8 +87,7 @@ InferenceThread::InferenceThread(
     if (trt_input_bytes_ != expected_input_size) {
         throw std::runtime_error("TensorRT input binding size does not match the NCHW float preprocessor output");
     }
-    const size_t output_size = static_cast<size_t>(model_output_width_) *
-        static_cast<size_t>(model_output_height_) * sizeof(float);
+    const size_t output_size = anomaly_map_shape->elements * sizeof(float);
     if (map_binding->size != output_size) {
         throw std::runtime_error("TensorRT anomaly_map byte size does not match its FLOAT shape");
     }
@@ -180,7 +177,12 @@ void InferenceThread::run() {
             // Step 3: Get output buffers from engine
             float* d_map = static_cast<float*>(engine_->getBuffer("anomaly_map"));
             const trt::Binding* map_info = engine_->getTensorInfo("anomaly_map");
+            const auto current_map_shape = map_info
+                ? parse_anomaly_map_shape(map_info->dims)
+                : std::nullopt;
             if (!d_map || !map_info || map_info->type != nvinfer1::DataType::kFLOAT ||
+                !current_map_shape || current_map_shape->height != model_output_height_ ||
+                current_map_shape->width != model_output_width_ ||
                 map_info->size != anomaly_map_bytes_) {
                 throw std::runtime_error("TensorRT anomaly_map binding changed or is unavailable");
             }

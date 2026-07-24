@@ -123,6 +123,11 @@ add_executable(test_dashboard_render_options
 )
 target_include_directories(test_dashboard_render_options PRIVATE ${PROJECT_SOURCE_DIR}/include)
 
+add_executable(test_anomaly_map_shape
+    ${PROJECT_SOURCE_DIR}/test/test_anomaly_map_shape.cpp
+)
+target_include_directories(test_anomaly_map_shape PRIVATE ${PROJECT_SOURCE_DIR}/include)
+
 add_executable(test_heatmap
     ${PROJECT_SOURCE_DIR}/test/test_heatmap.cu
     ${PROJECT_SOURCE_DIR}/src/common/kernels.cu
@@ -138,6 +143,7 @@ add_test(NAME engine_contract COMMAND test_engine_contract)
 add_test(NAME file_dialog_contract COMMAND test_file_dialog)
 add_test(NAME dashboard_task_state_contract COMMAND test_dashboard_task_state)
 add_test(NAME dashboard_render_options_contract COMMAND test_dashboard_render_options)
+add_test(NAME anomaly_map_shape_contract COMMAND test_anomaly_map_shape)
 set_tests_properties(engine_contract PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_test(NAME heatmap_contract COMMAND test_heatmap)
 add_test(NAME pipeline_model_contract COMMAND test_pipeline)
