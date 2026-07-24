@@ -67,7 +67,7 @@
 ### 👥 我是终端用户
 > 不需要写代码，只想运行软件？
 
-1. 下载最新发布的安装包：👉 **[点击下载 (Release)]()**
+1. 下载最新发布的安装包：👉 **[点击下载 (Release)](https://github.com/ShowayLiao/LiMR_cpp/releases/tag/v0.1.0)**
 2. 遇到问题？查看文档：📖 **[用户手册 (User Manual)](./docs/User_Manual_CN.md)**
 
 ### 👨‍💻 我是开发者

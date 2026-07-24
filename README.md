@@ -68,7 +68,7 @@
 ### 👥 I'm an End User
 > Don't want to code, just want to run the software?
 
-1. Download the latest release: 👉 **[Download (Release)]()**
+1. Download the latest release: 👉 **[Download (Release)](https://github.com/ShowayLiao/LiMR_cpp/releases/tag/v0.1.0)**
 2. Need help? Check the documentation: 📖 **[User Manual](./docs/User_Manual_CN.md)**
 
 ### 👨‍💻 I'm a Developer
