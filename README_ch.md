@@ -1,8 +1,8 @@
 <div align="center">
-  <h1>🏭 LiMR: 工业缺陷实时推理检测系统 (C++)</h1>
+  <h1>🏭 FastVision：高速工业视觉平台 (C++)</h1>
   
   <p>
-    <b>基于 TensorRT 10 和 CUDA 11 的高性能工业视觉解决方案</b>
+    <b>基于 TensorRT 10 和 CUDA 11 的高吞吐低延迟工业视觉平台</b>
   </p>
 
   <p>
@@ -28,7 +28,7 @@
 ## 📸 系统运行演示
 
 <div align="center">
-  <img src="docs/demo_placeholder.gif" alt="System Demo" width="100%" />
+  <img src="docs/image-test.png" alt="System Demo" width="100%" />
   <br>
   <i>实时三屏显示：原图采集 (左) | 异常热力图 (中) | 缺陷分割叠加 (右)</i>
 </div>
@@ -130,6 +130,22 @@
 > 如果本项目对您的研究或工作有所帮助，欢迎在 GitHub 上点一个 ⭐ **Star**！
 
 如果您发现任何 Bug 或有改进建议，欢迎提交 [Issue](https://github.com/ShowayLiao/LiMR/issues) 或 Pull Request。
+
+
+## 📚 Reference
+
+如果本项目对您的研究或工作有所帮助，欢迎引用我们的工作：
+
+```tex
+@article{liao2026limr,
+  author  = {Shaowei Liao and Wenyong Yu and Shaolin Liao},
+  title   = {Lightweight Masked Reconstruction for Real-Time Sensor-Driven
+             Anomaly Detection in Industrial IoT},
+  journal = {IEEE Internet of Things Journal},
+  year    = {2026},
+  doi     = {10.1109/JIOT.2026.3712733}
+}
+```
 
 ## 📜 License
 

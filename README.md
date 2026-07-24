@@ -1,8 +1,8 @@
 <div align="center">
-  <h1>🏭 LiMR: Real-time Industrial Defect Detection System (C++)</h1>
+  <h1>🏭 FastVision: Fast Industrial Vision Platform (C++)</h1>
   
   <p>
-    <b>High-performance industrial vision solution based on TensorRT 10 and CUDA 11</b>
+    <b>High-throughput, low-latency industrial vision platform based on TensorRT 10 and CUDA 11</b>
   </p>
 
   <p>
@@ -28,7 +28,8 @@
 ## 📸 System Demo
 
 <div align="center">
-  <img src="docs/demo_placeholder.gif" alt="System Demo" width="100%" />
+  <img src="docs/image-test.png" alt="System Demo" width="100%" />
+
   <br>
   <i>Real-time three-screen display: Original Capture (Left) | Anomaly Heatmap (Middle) | Defect Overlay (Right)</i>
 </div>
@@ -130,6 +131,22 @@ The system adopts a modular design, achieving efficient interoperation between c
 > If this project helps your research or work, please give it a ⭐ **Star** on GitHub!
 
 If you find any bugs or have improvement suggestions, please submit an [Issue](https://github.com/ShowayLiao/LiMR/issues) or Pull Request.
+
+
+## 📚 Reference
+
+If you find this project useful in your research or work, please cite this project:
+
+```tex
+@article{liao2026limr,
+  author  = {Shaowei Liao and Wenyong Yu and Shaolin Liao},
+  title   = {Lightweight Masked Reconstruction for Real-Time Sensor-Driven
+             Anomaly Detection in Industrial IoT},
+  journal = {IEEE Internet of Things Journal},
+  year    = {2026},
+  doi     = {10.1109/JIOT.2026.3712733}
+}
+```
 
 ## 📜 License
 
